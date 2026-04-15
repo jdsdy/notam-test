@@ -2,7 +2,10 @@
 
 import * as React from "react";
 
-import { signInWithPassword, signUpWithPassword } from "@/app/actions/auth";
+import {
+  signInWithPassword,
+  signUpWithPassword,
+} from "@/app/actions/auth";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,13 +13,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
+function isAuthMode(value: string): value is "signin" | "signup" {
+  return value === "signin" || value === "signup";
+}
+
 export default function AuthCard() {
   const [mode, setMode] = React.useState<"signin" | "signup">("signin");
   const [pending, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
+  const [info, setInfo] = React.useState<string | null>(null);
 
   function onSubmit(formData: FormData) {
     setError(null);
+    setInfo(null);
 
     startTransition(async () => {
       const res =
@@ -24,7 +33,21 @@ export default function AuthCard() {
           ? await signInWithPassword(formData)
           : await signUpWithPassword(formData);
 
-      if (res && !res.ok) setError(res.message);
+      if (!res) {
+        setError("Something went wrong. Try again.");
+        return;
+      }
+
+      if (res.ok) {
+        if ("pendingEmailConfirmation" in res && res.pendingEmailConfirmation) {
+          setInfo("Check your email to confirm your account, then sign in.");
+          return;
+        }
+        window.location.href = "/";
+        return;
+      }
+
+      setError(res.message);
     });
   }
 
@@ -49,7 +72,12 @@ export default function AuthCard() {
         </div>
       </CardHeader>
       <CardContent>
-        <Tabs value={mode} onValueChange={(v) => setMode(v as any)}>
+        <Tabs
+          value={mode}
+          onValueChange={(v) => {
+            if (isAuthMode(v)) setMode(v);
+          }}
+        >
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="signin">Sign in</TabsTrigger>
             <TabsTrigger value="signup">Create account</TabsTrigger>
@@ -58,6 +86,12 @@ export default function AuthCard() {
           {error ? (
             <Alert className="mt-4" variant="destructive">
               <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          ) : null}
+
+          {info ? (
+            <Alert className="mt-4">
+              <AlertDescription>{info}</AlertDescription>
             </Alert>
           ) : null}
 

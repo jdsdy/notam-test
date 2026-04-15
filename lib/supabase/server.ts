@@ -2,6 +2,7 @@ import "server-only";
 
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { cache } from "react";
 
 export async function createSupabaseServerClient() {
   const cookieStore = await cookies();
@@ -27,4 +28,14 @@ export async function createSupabaseServerClient() {
     },
   );
 }
+
+/** Per-request memoized user (layout + pages share one `getUser()`). */
+export const getCurrentUser = cache(async () => {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  return user;
+});
+
 

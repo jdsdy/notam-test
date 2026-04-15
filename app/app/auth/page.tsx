@@ -1,6 +1,6 @@
 import AuthCard from "@/components/auth/auth-card";
 
-export default function Home() {
+export default function AppAuthPage() {
   return (
     <main className="min-h-[calc(100vh)] bg-background">
       <div className="relative mx-auto grid min-h-[calc(100vh)] max-w-6xl grid-cols-1 items-center px-6 py-12 md:px-10">
