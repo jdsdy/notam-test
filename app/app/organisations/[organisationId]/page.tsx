@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import OrgAircraftFleet from "@/components/app/org-aircraft-fleet";
+import OrgFlightsCard from "@/components/app/org-flights-card";
 import OrgMembersTables from "@/components/app/org-members-tables";
 import { buttonVariants } from "@/components/ui/button";
 import {
@@ -12,6 +13,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { listAircraftForOrganisation } from "@/lib/aircraft";
+import { listFlightsForOrganisation } from "@/lib/flights";
 import {
   assertOrgAccess,
   getOrganisationName,
@@ -37,10 +39,11 @@ export default async function OrganisationManagePage({ params }: PageProps) {
     notFound();
   }
 
-  const [name, members, aircraft, canManageFleet] = await Promise.all([
+  const [name, members, aircraft, flights, canManageFleet] = await Promise.all([
     getOrganisationName(organisationId),
     listOrganisationMembers(organisationId),
     listAircraftForOrganisation(organisationId),
+    listFlightsForOrganisation(organisationId),
     isOrganisationAdmin(user.id, organisationId),
   ]);
 
@@ -71,6 +74,13 @@ export default async function OrganisationManagePage({ params }: PageProps) {
         organisationId={organisationId}
         aircraft={aircraft}
         canManage={canManageFleet}
+      />
+
+      <OrgFlightsCard
+        organisationId={organisationId}
+        flights={flights}
+        aircraft={aircraft}
+        members={members}
       />
 
       <Card className="shadow-sm">
