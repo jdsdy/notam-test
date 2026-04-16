@@ -1,3 +1,5 @@
+import { DUMMY_FLIGHT_PLAN_NOTAMS } from "@/lib/notams";
+
 /** Fields that can be filled from a flight plan PDF (excluding ids and timestamps). */
 export type FlightPlanParsedFields = {
   departure_icao: string | null;
@@ -49,6 +51,7 @@ export function buildDummyFlightPlanParseResponse(): FlightPlanParseApiResponse 
         source: "dummy",
         alternate: "KCMI",
         filedAltitudeFt: 24000,
+        notams: DUMMY_FLIGHT_PLAN_NOTAMS,
       },
     },
     needsManualReview: [

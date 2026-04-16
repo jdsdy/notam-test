@@ -4,6 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 
 import { updateFlightPlanFieldsFromFormAction } from "@/app/actions/flight";
+import NotamAnalysisPanel from "@/components/app/notam-analysis-panel";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,6 +26,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import type { FlightDetail } from "@/lib/flights";
 import type { FlightPlanFieldKey, FlightPlanParseApiResponse } from "@/lib/flight-plan-parse";
+import { countNotamsInFlightPlanJson, type LatestNotamAnalysisForClient } from "@/lib/notams";
 import {
   FLIGHT_STATUS_LABELS,
   FLIGHT_STATUS_VALUES,
@@ -108,9 +110,11 @@ function FieldBlock({
 export default function FlightWorkspace({
   organisationId,
   flight,
+  latestNotamAnalysis,
 }: {
   organisationId: string;
   flight: FlightDetail;
+  latestNotamAnalysis: LatestNotamAnalysisForClient | null;
 }) {
   const router = useRouter();
   const [form, setForm] = React.useState(() => formStateFromFlight(flight));
@@ -402,20 +406,12 @@ export default function FlightWorkspace({
 
       <Separator />
 
-      <Card className="shadow-sm">
-        <CardHeader>
-          <CardTitle>NOTAM analysis</CardTitle>
-          <CardDescription>
-            Core trip tools will live here. This section is a placeholder for now.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground">
-            Once the flight plan is saved, you will be able to run NOTAM analysis for
-            this flight from this workspace.
-          </p>
-        </CardContent>
-      </Card>
+      <NotamAnalysisPanel
+        organisationId={organisationId}
+        flightId={flight.id}
+        savedNotamCount={countNotamsInFlightPlanJson(flight.flight_plan_json)}
+        latestAnalysis={latestNotamAnalysis}
+      />
     </div>
   );
 }

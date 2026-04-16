@@ -130,3 +130,28 @@
     @apply font-sans;
   }
 }
+
+@layer utilities {
+  @keyframes notam-shimmer-slide {
+    0% {
+      background-position: 200% center;
+    }
+    100% {
+      background-position: -200% center;
+    }
+  }
+
+  .notam-ai-shimmer {
+    background: linear-gradient(
+      90deg,
+      var(--muted-foreground) 0%,
+      var(--foreground) 42%,
+      var(--muted-foreground) 84%
+    );
+    background-size: 220% auto;
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+    animation: notam-shimmer-slide 2.1s ease-in-out infinite;
+  }
+}
