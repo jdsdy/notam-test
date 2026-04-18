@@ -1,4 +1,4 @@
-import { DUMMY_FLIGHT_PLAN_NOTAMS } from "@/lib/notams";
+import { DUMMY_FLIGHT_PLAN_NOTAMS, type RawNotam } from "@/lib/notams";
 
 /** Fields that can be filled from a flight plan PDF (excluding ids and timestamps). */
 export type FlightPlanParsedFields = {
@@ -23,6 +23,10 @@ export type FlightPlanParseApiResponse = {
   fields: FlightPlanParsedFields;
   /** Fields the parser could not determine reliably — highlight in the UI. */
   needsManualReview: FlightPlanFieldKey[];
+  /** DB row for this extraction (`notam_analyses`) when NOTAMs were stored. */
+  notamAnalysisId: string | null;
+  /** Same NOTAM list as in `fields.flight_plan_json` — convenient for UI badges without re-parsing. */
+  notamsIdentified: RawNotam[];
 };
 
 export function buildDummyFlightPlanParseResponse(): FlightPlanParseApiResponse {
@@ -33,6 +37,8 @@ export function buildDummyFlightPlanParseResponse(): FlightPlanParseApiResponse 
 
   return {
     ok: true,
+    notamAnalysisId: null,
+    notamsIdentified: DUMMY_FLIGHT_PLAN_NOTAMS,
     fields: {
       departure_icao: "KPTK",
       arrival_icao: "KORD",
@@ -59,5 +65,17 @@ export function buildDummyFlightPlanParseResponse(): FlightPlanParseApiResponse 
       "time_enroute",
       "arrival_rwy",
     ],
+  };
+}
+
+/** Fills API response metadata after persistence (IDs come from the database). */
+export function withParseResponseMeta(
+  base: FlightPlanParseApiResponse,
+  meta: { notamAnalysisId: string | null; notamsIdentified: RawNotam[] },
+): FlightPlanParseApiResponse {
+  return {
+    ...base,
+    notamAnalysisId: meta.notamAnalysisId,
+    notamsIdentified: meta.notamsIdentified,
   };
 }

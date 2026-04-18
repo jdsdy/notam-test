@@ -24,9 +24,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import type { NotamAnalysisWorkspaceState } from "@/lib/notam-analyses";
 import type { FlightDetail } from "@/lib/flights";
 import type { FlightPlanFieldKey, FlightPlanParseApiResponse } from "@/lib/flight-plan-parse";
-import { countNotamsInFlightPlanJson, type LatestNotamAnalysisForClient } from "@/lib/notams";
+import { countNotamsInFlightPlanJson } from "@/lib/notams";
 import {
   FLIGHT_STATUS_LABELS,
   FLIGHT_STATUS_VALUES,
@@ -110,13 +111,14 @@ function FieldBlock({
 export default function FlightWorkspace({
   organisationId,
   flight,
-  latestNotamAnalysis,
+  notamWorkspace,
 }: {
   organisationId: string;
   flight: FlightDetail;
-  latestNotamAnalysis: LatestNotamAnalysisForClient | null;
+  notamWorkspace: NotamAnalysisWorkspaceState;
 }) {
   const router = useRouter();
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [form, setForm] = React.useState(() => formStateFromFlight(flight));
   const [needsReview, setNeedsReview] = React.useState<Set<FlightPlanFieldKey>>(
     () => new Set(),
@@ -134,14 +136,22 @@ export default function FlightWorkspace({
     setForm((s) => ({ ...s, [key]: value }));
   }
 
-  async function handleSimulateParse() {
+  async function handleParseFlightPlanUpload() {
     setParseError(null);
     setParsePending(true);
     try {
-      const res = await fetch(`/api/flights/${flight.id}/parse-flight-plan`, {
+      const file = fileInputRef.current?.files?.[0];
+      const init: RequestInit = {
         method: "POST",
         credentials: "same-origin",
-      });
+      };
+      if (file) {
+        const fd = new FormData();
+        fd.append("file", file);
+        init.body = fd;
+      }
+
+      const res = await fetch(`/api/flights/${flight.id}/parse-flight-plan`, init);
       const body = (await res.json()) as FlightPlanParseApiResponse | { ok?: false; error?: string };
 
       if (!res.ok || !("ok" in body) || body.ok !== true) {
@@ -155,6 +165,7 @@ export default function FlightWorkspace({
 
       setForm(applyParseToFormState(body));
       setNeedsReview(new Set(body.needsManualReview));
+      router.refresh();
     } catch {
       setParseError("Network error while parsing the flight plan.");
     } finally {
@@ -187,8 +198,9 @@ export default function FlightWorkspace({
         <CardHeader>
           <CardTitle>Flight plan</CardTitle>
           <CardDescription>
-            Upload and parse will arrive here. For now, use the test control to load
-            dummy extracted data and highlight fields that need your input.
+            Upload a PDF to run extraction (dummy implementation for now). The parse API
+            writes flight fields and a pending NOTAM extraction row, then returns the same
+            payload for the form.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -199,17 +211,23 @@ export default function FlightWorkspace({
             </Alert>
           ) : null}
 
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/pdf,.pdf"
+              className="text-sm file:mr-3 file:rounded-md file:border file:border-input file:bg-background file:px-3 file:py-1.5 file:text-sm file:font-medium"
+            />
             <Button
               type="button"
               variant="secondary"
-              onClick={handleSimulateParse}
+              onClick={handleParseFlightPlanUpload}
               disabled={parsePending}
             >
-              {parsePending ? "Simulating…" : "Simulate successful PDF upload"}
+              {parsePending ? "Parsing…" : "Upload and parse"}
             </Button>
-            <p className="text-xs text-muted-foreground">
-              Calls the parse API and prefills the form below (dummy data).
+            <p className="text-xs text-muted-foreground sm:max-w-md">
+              Optional file: omit it to run the same dummy parse without attaching a PDF.
             </p>
           </div>
         </CardContent>
@@ -407,10 +425,9 @@ export default function FlightWorkspace({
       <Separator />
 
       <NotamAnalysisPanel
-        organisationId={organisationId}
         flightId={flight.id}
         savedNotamCount={countNotamsInFlightPlanJson(flight.flight_plan_json)}
-        latestAnalysis={latestNotamAnalysis}
+        notamWorkspace={notamWorkspace}
       />
     </div>
   );

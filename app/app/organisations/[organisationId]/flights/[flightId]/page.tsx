@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import FlightWorkspace from "@/components/app/flight-workspace";
 import { buttonVariants } from "@/components/ui/button";
 import { getFlightDetailForUser } from "@/lib/flights";
-import { getLatestNotamAnalysisForFlight } from "@/lib/notam-analyses";
+import { getNotamAnalysisWorkspaceState } from "@/lib/notam-analyses";
 import {
   assertOrgAccess,
   getOrganisationName,
@@ -28,10 +28,10 @@ export default async function FlightPage({ params }: PageProps) {
     notFound();
   }
 
-  const [name, flight, latestNotamAnalysis] = await Promise.all([
+  const [name, flight, notamWorkspace] = await Promise.all([
     getOrganisationName(organisationId),
     getFlightDetailForUser(user.id, organisationId, flightId),
-    getLatestNotamAnalysisForFlight(user.id, organisationId, flightId),
+    getNotamAnalysisWorkspaceState(user.id, organisationId, flightId),
   ]);
 
   if (!flight) {
@@ -81,7 +81,7 @@ export default async function FlightPage({ params }: PageProps) {
       <FlightWorkspace
         organisationId={organisationId}
         flight={flight}
-        latestNotamAnalysis={latestNotamAnalysis}
+        notamWorkspace={notamWorkspace}
       />
     </main>
   );

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
+import { syncPendingNotamAnalysisRawFromFlightJson } from "@/lib/notam-analysis-service";
 import {
   assertAircraftBelongsToOrganisation,
   assertPicIsMemberOfOrganisation,
@@ -117,6 +118,12 @@ export async function updateFlightPlanFieldsAction(input: {
   if (error) {
     return { error: error.message };
   }
+
+  await syncPendingNotamAnalysisRawFromFlightJson(
+    supabase,
+    input.flightId,
+    input.fields.flight_plan_json,
+  );
 
   revalidatePath(`/organisations/${input.organisationId}`);
   revalidatePath(`/organisations/${input.organisationId}/flights/${input.flightId}`);

@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 
-import { runNotamAnalysisAction } from "@/app/actions/notam-analysis";
+import type { NotamAnalysisWorkspaceState } from "@/lib/notam-analyses";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { AnalysedNotam, LatestNotamAnalysisForClient } from "@/lib/notams";
+import type { AnalysedNotam } from "@/lib/notams";
 import { notamCategoryStyles } from "@/lib/notams";
 import { cn } from "@/lib/utils";
 
@@ -34,10 +34,9 @@ const CATEGORY_HEADLINE: Record<1 | 2 | 3, string> = {
 };
 
 type Props = {
-  organisationId: string;
   flightId: string;
   savedNotamCount: number;
-  latestAnalysis: LatestNotamAnalysisForClient | null;
+  notamWorkspace: NotamAnalysisWorkspaceState;
 };
 
 function DetailField({ label, value }: { label: string; value: string }) {
@@ -53,25 +52,37 @@ function DetailField({ label, value }: { label: string; value: string }) {
 }
 
 export default function NotamAnalysisPanel({
-  organisationId,
   flightId,
   savedNotamCount,
-  latestAnalysis,
+  notamWorkspace,
 }: Props) {
   const router = useRouter();
   const [analyseError, setAnalyseError] = React.useState<string | null>(null);
   const [detailNotam, setDetailNotam] = React.useState<AnalysedNotam | null>(null);
-  const [pending, startTransition] = React.useTransition();
+  const [analyseBusy, startAnalyse] = React.useTransition();
 
-  const canAnalyse = savedNotamCount > 0 && !pending;
+  const pendingRawCount = notamWorkspace.pending?.rawNotamCount ?? 0;
+  const canAnalyse = pendingRawCount > 0 && !analyseBusy;
+  const latestAnalysis = notamWorkspace.latestComplete;
   const analysed = latestAnalysis?.analysed.notams ?? [];
 
   function handleRunAnalysis() {
     setAnalyseError(null);
-    startTransition(async () => {
-      const res = await runNotamAnalysisAction({ organisationId, flightId });
-      if (!res.ok) {
-        setAnalyseError(res.error);
+    startAnalyse(async () => {
+      const res = await fetch(`/api/flights/${flightId}/analyse-notams`, {
+        method: "POST",
+        credentials: "same-origin",
+      });
+      const body = (await res.json()) as
+        | { ok: true; analysisId: string }
+        | { ok?: false; error?: string };
+
+      if (!res.ok || !("ok" in body) || body.ok !== true) {
+        const msg =
+          typeof body === "object" && body && "error" in body
+            ? String((body as { error?: string }).error ?? res.statusText)
+            : "Request failed.";
+        setAnalyseError(msg);
         return;
       }
       router.refresh();
@@ -84,20 +95,30 @@ export default function NotamAnalysisPanel({
         <CardHeader>
           <CardTitle>NOTAM analysis</CardTitle>
           <CardDescription>
-            NOTAMs extracted from your saved flight plan JSON are categorised (1–3) and
-            summarised for briefing. Open any row to read the full NOTAM text.
+            After you upload a flight plan, raw NOTAMs are stored in{" "}
+            <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">
+              notam_analyses
+            </code>{" "}
+            until you run analysis. The second API call simulates an AI model, then saves
+            categorised results on the same row.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="flex flex-col gap-3 rounded-lg border border-border/80 bg-muted/30 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-sm font-medium text-foreground">NOTAMs on saved flight plan</p>
+              <p className="text-sm font-medium text-foreground">
+                Raw NOTAMs ready for analysis
+              </p>
               <p className="text-2xl font-semibold tabular-nums tracking-tight">
-                {savedNotamCount}
+                {pendingRawCount}
               </p>
               <p className="text-xs text-muted-foreground">
-                Parsed from the <span className="font-medium">notams</span> array in flight plan
-                JSON after you save flight details.
+                {notamWorkspace.pending
+                  ? "Pending extraction row — edit flight plan JSON and save to sync."
+                  : "Upload and parse a flight plan to create a pending extraction, or rely on saved flight plan JSON count below."}{" "}
+                <span className="font-medium text-foreground">
+                  (saved JSON: {savedNotamCount})
+                </span>
               </p>
             </div>
             <Button
@@ -106,14 +127,14 @@ export default function NotamAnalysisPanel({
               disabled={!canAnalyse}
               className="shrink-0 sm:self-center"
             >
-              {pending ? "Analysing…" : "Analyse NOTAMs"}
+              {analyseBusy ? "Analysing…" : "Analyse NOTAMs"}
             </Button>
           </div>
 
-          {savedNotamCount === 0 ? (
+          {!notamWorkspace.pending && savedNotamCount === 0 ? (
             <p className="text-sm text-muted-foreground">
-              Save flight details with NOTAM data in the flight plan JSON (for example, use
-              &quot;Simulate successful PDF upload&quot; then save) to enable analysis.
+              Upload and parse a flight plan to extract NOTAMs into the database, then run
+              analysis when ready.
             </p>
           ) : null}
 
@@ -124,7 +145,7 @@ export default function NotamAnalysisPanel({
             </Alert>
           ) : null}
 
-          {pending ? (
+          {analyseBusy ? (
             <div className="space-y-4 rounded-lg border border-dashed border-border bg-card/50 p-4">
               <p className="notam-ai-shimmer text-sm font-medium">
                 AI model is categorising NOTAMs and writing plain-language summaries…
@@ -218,13 +239,16 @@ export default function NotamAnalysisPanel({
                 );
               })}
             </div>
-          ) : !pending && savedNotamCount > 0 ? (
+          ) : !analyseBusy &&
+            !latestAnalysis &&
+            notamWorkspace.pending &&
+            pendingRawCount > 0 ? (
             <p className="text-sm text-muted-foreground">
-              No analysis on file yet for this flight. Run an analysis to store results in{" "}
+              No completed analysis on file yet for this flight. Run an analysis to fill{" "}
               <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">
-                notam_analyses
-              </code>
-              .
+                analysed_notams
+              </code>{" "}
+              on the pending row.
             </p>
           ) : null}
         </CardContent>
