@@ -1,18 +1,21 @@
 /** NOTAM record shape extracted from a flight plan (PDF) — matches downstream filters. */
 export type RawNotam = {
-  id: string;
-  title: string;
-  q: string;
-  a: string;
-  b: string;
-  c: string;
-  d?: string;
-  e: string;
-  f?: string;
-  g?: string;
+  id: string | null;
+  title: string | null;
+  q: string | null;
+  a: string | null;
+  b: string | null;
+  c: string | null;
+  d?: string | null;
+  e: string | null;
+  f?: string | null;
+  g?: string | null;
 };
 
-export type RawNotamsPayload = { notams: RawNotam[] };
+export type RawNotamsPayload = {
+  notams: RawNotam[];
+  unformatted_notams: string[];
+};
 
 /** After AI analysis — category + summary plus original NOTAM fields. */
 export type AnalysedNotam = RawNotam & {
@@ -148,14 +151,18 @@ export const DUMMY_FLIGHT_PLAN_NOTAMS: RawNotam[] = [
 export function isRawNotam(value: unknown): value is RawNotam {
   if (!value || typeof value !== "object") return false;
   const o = value as Record<string, unknown>;
+  const isStringOrNull = (v: unknown) => typeof v === "string" || v === null;
   return (
-    typeof o.id === "string" &&
-    typeof o.title === "string" &&
-    typeof o.q === "string" &&
-    typeof o.a === "string" &&
-    typeof o.b === "string" &&
-    typeof o.c === "string" &&
-    typeof o.e === "string"
+    isStringOrNull(o.id) &&
+    isStringOrNull(o.title) &&
+    isStringOrNull(o.q) &&
+    isStringOrNull(o.a) &&
+    isStringOrNull(o.b) &&
+    isStringOrNull(o.c) &&
+    isStringOrNull(o.e) &&
+    (o.d === undefined || isStringOrNull(o.d)) &&
+    (o.f === undefined || isStringOrNull(o.f)) &&
+    (o.g === undefined || isStringOrNull(o.g))
   );
 }
 
@@ -163,14 +170,24 @@ export function parseRawNotamsFromFlightPlanJson(
   json: Record<string, unknown> | null,
 ): RawNotamsPayload | null {
   if (!json) return null;
+
+  const unformattedNotams = Array.isArray(json.unformatted_notams)
+    ? json.unformatted_notams
+        .filter((value): value is string => typeof value === "string")
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0)
+    : [];
+
   const raw = json.notams;
-  if (!Array.isArray(raw) || raw.length === 0) return null;
   const notams: RawNotam[] = [];
-  for (const item of raw) {
-    if (isRawNotam(item)) notams.push(item);
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      if (isRawNotam(item)) notams.push(item);
+    }
   }
-  if (notams.length === 0) return null;
-  return { notams };
+
+  if (notams.length === 0 && unformattedNotams.length === 0) return null;
+  return { notams, unformatted_notams: unformattedNotams };
 }
 
 export function countNotamsInFlightPlanJson(
@@ -184,11 +201,11 @@ const CATEGORY_SUMMARIES: Record<
   (n: RawNotam) => string
 > = {
   1: (n) =>
-    `High operational impact: ${n.title.toLowerCase()} — review alternates, minima, and timing before departure.`,
+    `High operational impact: ${(n.title ?? "unknown notam").toLowerCase()} — review alternates, minima, and timing before departure.`,
   2: (n) =>
-    `Moderate impact: ${n.title.toLowerCase()} — confirm briefing items and any procedure changes with ATC.`,
+    `Moderate impact: ${(n.title ?? "unknown notam").toLowerCase()} — confirm briefing items and any procedure changes with ATC.`,
   3: (n) =>
-    `Advisory / low impact: ${n.title.toLowerCase()} — note for situational awareness; unlikely to change your filed plan.`,
+    `Advisory / low impact: ${(n.title ?? "unknown notam").toLowerCase()} — note for situational awareness; unlikely to change your filed plan.`,
 };
 
 /** Deterministic “AI” output for development (replace with real model integration). */
@@ -225,17 +242,17 @@ export function parseAnalysedNotamsPayload(
     const summary = typeof r.summary === "string" ? r.summary : null;
     if (category == null || summary == null) continue;
     const base: Partial<RawNotam> = {
-      id: typeof r.id === "string" ? r.id : "",
-      title: typeof r.title === "string" ? r.title : "",
-      q: typeof r.q === "string" ? r.q : "",
-      a: typeof r.a === "string" ? r.a : "",
-      b: typeof r.b === "string" ? r.b : "",
-      c: typeof r.c === "string" ? r.c : "",
-      e: typeof r.e === "string" ? r.e : "",
+      id: typeof r.id === "string" || r.id === null ? r.id : null,
+      title: typeof r.title === "string" || r.title === null ? r.title : null,
+      q: typeof r.q === "string" || r.q === null ? r.q : null,
+      a: typeof r.a === "string" || r.a === null ? r.a : null,
+      b: typeof r.b === "string" || r.b === null ? r.b : null,
+      c: typeof r.c === "string" || r.c === null ? r.c : null,
+      e: typeof r.e === "string" || r.e === null ? r.e : null,
     };
-    if (typeof r.d === "string") base.d = r.d;
-    if (typeof r.f === "string") base.f = r.f;
-    if (typeof r.g === "string") base.g = r.g;
+    if (typeof r.d === "string" || r.d === null) base.d = r.d;
+    if (typeof r.f === "string" || r.f === null) base.f = r.f;
+    if (typeof r.g === "string" || r.g === null) base.g = r.g;
     if (!isRawNotam(base)) continue;
     notams.push({ ...base, category, summary });
   }

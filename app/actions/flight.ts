@@ -109,7 +109,6 @@ export async function updateFlightPlanFieldsAction(input: {
       route: input.fields.route?.trim() || null,
       aircraft_weight: input.fields.aircraft_weight,
       status: statusVal,
-      flight_plan_pdf_text: input.fields.flight_plan_pdf_text?.trim() || null,
       flight_plan_json: input.fields.flight_plan_json,
     })
     .eq("id", input.flightId)
@@ -144,7 +143,6 @@ export async function updateFlightPlanFieldsFromFormAction(input: {
   route: string;
   aircraft_weight: string;
   status: string;
-  flight_plan_pdf_text: string;
   flight_plan_json: string;
 }): Promise<UpdateFlightPlanFieldsResult> {
   let flight_plan_json: Record<string, unknown> | null = null;
@@ -172,7 +170,6 @@ export async function updateFlightPlanFieldsFromFormAction(input: {
     route: input.route.trim() || null,
     aircraft_weight: parseOptionalInt(input.aircraft_weight),
     status: input.status.trim() || null,
-    flight_plan_pdf_text: input.flight_plan_pdf_text.trim() || null,
     flight_plan_json,
   };
 

@@ -12,6 +12,8 @@ import {
 } from "@/lib/notams";
 
 const ANALYSIS_DELAY_MS = 2600;
+const RAW_NOTAMS_EXTRACTION_STATUS_KEY = "_status";
+const RAW_NOTAMS_EXTRACTION_STATUS_EXTRACTING = "extracting";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -39,22 +41,30 @@ export async function applyParsedFlightPlanToFlight(
     };
   }
 
+  const updatePayload: Record<string, unknown> = {
+    departure_icao: fields.departure_icao?.trim() || null,
+    arrival_icao: fields.arrival_icao?.trim() || null,
+    departure_time: fields.departure_time,
+    arrival_time: fields.arrival_time,
+    time_enroute: fields.time_enroute,
+    departure_rwy: fields.departure_rwy?.trim() || null,
+    arrival_rwy: fields.arrival_rwy?.trim() || null,
+    route: fields.route?.trim() || null,
+    aircraft_weight: fields.aircraft_weight,
+    status: statusVal,
+    flight_plan_json: fields.flight_plan_json,
+  };
+
+  if ("flight_metadata" in fields) {
+    updatePayload.flight_metadata = fields.flight_metadata ?? null;
+  }
+  if ("pdf_file_id" in fields) {
+    updatePayload.pdf_file_id = fields.pdf_file_id?.trim() || null;
+  }
+
   const { error } = await supabase
     .from("flights")
-    .update({
-      departure_icao: fields.departure_icao?.trim() || null,
-      arrival_icao: fields.arrival_icao?.trim() || null,
-      departure_time: fields.departure_time,
-      arrival_time: fields.arrival_time,
-      time_enroute: fields.time_enroute,
-      departure_rwy: fields.departure_rwy?.trim() || null,
-      arrival_rwy: fields.arrival_rwy?.trim() || null,
-      route: fields.route?.trim() || null,
-      aircraft_weight: fields.aircraft_weight,
-      status: statusVal,
-      flight_plan_pdf_text: fields.flight_plan_pdf_text?.trim() || null,
-      flight_plan_json: fields.flight_plan_json,
-    })
+    .update(updatePayload)
     .eq("id", flightId)
     .eq("organisation_id", organisationId);
 
@@ -82,7 +92,9 @@ export async function upsertPendingNotamAnalysis(
     .limit(1)
     .maybeSingle();
 
-  if (!rawPayload?.notams.length) {
+  const hasFormattedNotams = (rawPayload?.notams.length ?? 0) > 0;
+  const hasUnformattedNotams = (rawPayload?.unformatted_notams.length ?? 0) > 0;
+  if (!hasFormattedNotams && !hasUnformattedNotams) {
     if (pending?.id) {
       await supabase.from("notam_analyses").delete().eq("id", pending.id as string);
     }
@@ -110,6 +122,54 @@ export async function upsertPendingNotamAnalysis(
   if (insertErr) {
     return { notamAnalysisId: null };
   }
+  return { notamAnalysisId: id };
+}
+
+/**
+ * Marks the latest pending NOTAM row for this flight as "extracting", or
+ * creates one if it does not exist yet. Used to drive UI loading state while
+ * background NOTAM extraction is still running.
+ */
+export async function markPendingNotamExtraction(
+  supabase: SupabaseClient,
+  flightId: string,
+): Promise<{ notamAnalysisId: string | null }> {
+  const extractionMarker = {
+    [RAW_NOTAMS_EXTRACTION_STATUS_KEY]: RAW_NOTAMS_EXTRACTION_STATUS_EXTRACTING,
+    notams: [],
+  };
+
+  const { data: pending } = await supabase
+    .from("notam_analyses")
+    .select("id")
+    .eq("flight_id", flightId)
+    .is("analysed_notams", null)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (pending?.id) {
+    const { error } = await supabase
+      .from("notam_analyses")
+      .update({ raw_notams: extractionMarker })
+      .eq("id", pending.id as string);
+    if (error) {
+      return { notamAnalysisId: null };
+    }
+    return { notamAnalysisId: pending.id as string };
+  }
+
+  const id = crypto.randomUUID();
+  const { error: insertErr } = await supabase.from("notam_analyses").insert({
+    id,
+    flight_id: flightId,
+    raw_notams: extractionMarker,
+    analysed_notams: null,
+  });
+  if (insertErr) {
+    return { notamAnalysisId: null };
+  }
+
   return { notamAnalysisId: id };
 }
 

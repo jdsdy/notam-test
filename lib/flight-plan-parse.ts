@@ -1,6 +1,6 @@
-import { DUMMY_FLIGHT_PLAN_NOTAMS, type RawNotam } from "@/lib/notams";
+import type { RawNotam } from "@/lib/notams";
 
-/** Fields that can be filled from a flight plan PDF (excluding ids and timestamps). */
+/** Fields extracted from a flight plan PDF and persisted to `flights`. */
 export type FlightPlanParsedFields = {
   departure_icao: string | null;
   arrival_icao: string | null;
@@ -12,11 +12,37 @@ export type FlightPlanParsedFields = {
   route: string | null;
   aircraft_weight: number | null;
   status: string | null;
-  flight_plan_pdf_text: string | null;
   flight_plan_json: Record<string, unknown> | null;
+  /** Supplemental extraction notes useful for NOTAM analysis and operator context. */
+  flight_metadata?: Record<string, unknown> | null;
+  /** Anthropic Files API identifier for the uploaded flight plan PDF. */
+  pdf_file_id?: string | null;
 };
 
-export type FlightPlanFieldKey = keyof FlightPlanParsedFields;
+/** Fields the parser may list in `unidentified_fields` (excludes pilot-set `status`). */
+export const FLIGHT_PLAN_PARSER_UNIDENTIFIED_FIELDS = [
+  "departure_icao",
+  "arrival_icao",
+  "departure_time",
+  "arrival_time",
+  "time_enroute",
+  "departure_rwy",
+  "arrival_rwy",
+  "route",
+  "aircraft_weight",
+  "flight_plan_json",
+] as const;
+
+export type FlightPlanParserUnidentifiedFieldKey =
+  (typeof FLIGHT_PLAN_PARSER_UNIDENTIFIED_FIELDS)[number];
+
+/** Fields that map to editable form inputs in the flight workspace (includes manual status). */
+export const FLIGHT_PLAN_REVIEWABLE_FIELDS = [
+  ...FLIGHT_PLAN_PARSER_UNIDENTIFIED_FIELDS,
+  "status",
+] as const;
+
+export type FlightPlanFieldKey = (typeof FLIGHT_PLAN_REVIEWABLE_FIELDS)[number];
 
 export type FlightPlanParseApiResponse = {
   ok: true;
@@ -28,45 +54,6 @@ export type FlightPlanParseApiResponse = {
   /** Same NOTAM list as in `fields.flight_plan_json` — convenient for UI badges without re-parsing. */
   notamsIdentified: RawNotam[];
 };
-
-export function buildDummyFlightPlanParseResponse(): FlightPlanParseApiResponse {
-  const departure = new Date();
-  departure.setUTCHours(14, 30, 0, 0);
-  const arrival = new Date(departure);
-  arrival.setUTCMinutes(arrival.getUTCMinutes() + 95);
-
-  return {
-    ok: true,
-    notamAnalysisId: null,
-    notamsIdentified: DUMMY_FLIGHT_PLAN_NOTAMS,
-    fields: {
-      departure_icao: "KPTK",
-      arrival_icao: "KORD",
-      departure_time: departure.toISOString(),
-      arrival_time: null,
-      time_enroute: null,
-      departure_rwy: "09",
-      arrival_rwy: null,
-      route:
-        "KPTK..ROGGE V97 SVM DCT EMMIE DCT KORD — sample route from dummy parser",
-      aircraft_weight: 3850,
-      status: "filled",
-      flight_plan_pdf_text:
-        "Dummy OCR text: filed IFR, alternate KCMI, EET 1+35, cruise FL240.",
-      flight_plan_json: {
-        source: "dummy",
-        alternate: "KCMI",
-        filedAltitudeFt: 24000,
-        notams: DUMMY_FLIGHT_PLAN_NOTAMS,
-      },
-    },
-    needsManualReview: [
-      "arrival_time",
-      "time_enroute",
-      "arrival_rwy",
-    ],
-  };
-}
 
 /** Fills API response metadata after persistence (IDs come from the database). */
 export function withParseResponseMeta(

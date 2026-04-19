@@ -17,8 +17,9 @@ export type FlightRow = {
   route: string | null;
   aircraft_weight: number | null;
   status: string | null;
-  flight_plan_pdf_text: string | null;
   flight_plan_json: Record<string, unknown> | null;
+  flight_metadata: Record<string, unknown> | null;
+  pdf_file_id: string | null;
   created_at: string;
 };
 
@@ -151,8 +152,9 @@ export async function getFlightDetailForUser(
         "route",
         "aircraft_weight",
         "status",
-        "flight_plan_pdf_text",
         "flight_plan_json",
+        "flight_metadata",
+        "pdf_file_id",
         "created_at",
       ].join(", "),
     )
@@ -180,10 +182,17 @@ export async function getFlightDetailForUser(
     json && typeof json === "object" && !Array.isArray(json)
       ? (json as Record<string, unknown>)
       : null;
+  const metadata = row.flight_metadata;
+  const normalizedMetadata =
+    metadata && typeof metadata === "object" && !Array.isArray(metadata)
+      ? (metadata as Record<string, unknown>)
+      : null;
 
   return {
     ...row,
     flight_plan_json: normalizedJson,
+    flight_metadata: normalizedMetadata,
+    pdf_file_id: row.pdf_file_id ?? null,
     tail_number: (ac?.tail_number as string) ?? "—",
     aircraft_type: (ac?.type as string) ?? "—",
     aircraft_manufacturer: (ac?.manufacturer as string) ?? "—",

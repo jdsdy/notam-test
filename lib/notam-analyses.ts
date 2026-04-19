@@ -21,6 +21,7 @@ export type PendingNotamAnalysis = {
   id: string;
   createdAt: string;
   rawNotamCount: number;
+  extracting: boolean;
 };
 
 export type NotamAnalysisWorkspaceState = {
@@ -61,18 +62,22 @@ export async function getNotamAnalysisWorkspaceState(
 
   let pending: PendingNotamAnalysis | null = null;
   if (pendingRow) {
-    const raw = parseRawNotamsFromFlightPlanJson(
+    const rawPayload =
       pendingRow.raw_notams &&
-        typeof pendingRow.raw_notams === "object" &&
-        !Array.isArray(pendingRow.raw_notams)
+      typeof pendingRow.raw_notams === "object" &&
+      !Array.isArray(pendingRow.raw_notams)
         ? (pendingRow.raw_notams as Record<string, unknown>)
-        : null,
+        : null;
+    const raw = parseRawNotamsFromFlightPlanJson(
+      rawPayload,
     );
+    const extracting = rawPayload?._status === "extracting";
     const rawNotamCount = raw?.notams.length ?? 0;
     pending = {
       id: pendingRow.id as string,
       createdAt: pendingRow.created_at as string,
       rawNotamCount,
+      extracting,
     };
   }
 

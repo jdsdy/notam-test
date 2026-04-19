@@ -39,7 +39,7 @@ type Props = {
   notamWorkspace: NotamAnalysisWorkspaceState;
 };
 
-function DetailField({ label, value }: { label: string; value: string }) {
+function DetailField({ label, value }: { label: string; value: string | null | undefined }) {
   if (!value) return null;
   return (
     <div className="space-y-1">
@@ -62,9 +62,20 @@ export default function NotamAnalysisPanel({
   const [analyseBusy, startAnalyse] = React.useTransition();
 
   const pendingRawCount = notamWorkspace.pending?.rawNotamCount ?? 0;
-  const canAnalyse = pendingRawCount > 0 && !analyseBusy;
+  const extractionPending = Boolean(notamWorkspace.pending?.extracting);
+  const canAnalyse = pendingRawCount > 0 && !analyseBusy && !extractionPending;
   const latestAnalysis = notamWorkspace.latestComplete;
   const analysed = latestAnalysis?.analysed.notams ?? [];
+
+  React.useEffect(() => {
+    if (!extractionPending) return;
+
+    const id = window.setInterval(() => {
+      router.refresh();
+    }, 2500);
+
+    return () => window.clearInterval(id);
+  }, [extractionPending, router]);
 
   function handleRunAnalysis() {
     setAnalyseError(null);
@@ -109,11 +120,19 @@ export default function NotamAnalysisPanel({
               <p className="text-sm font-medium text-foreground">
                 Raw NOTAMs ready for analysis
               </p>
-              <p className="text-2xl font-semibold tabular-nums tracking-tight">
-                {pendingRawCount}
-              </p>
+              {extractionPending ? (
+                <p className="notam-ai-shimmer text-sm font-medium text-foreground">
+                  Extracting NOTAMs from uploaded flight plan...
+                </p>
+              ) : (
+                <p className="text-2xl font-semibold tabular-nums tracking-tight">
+                  {pendingRawCount}
+                </p>
+              )}
               <p className="text-xs text-muted-foreground">
-                {notamWorkspace.pending
+                {extractionPending
+                  ? "NOTAM extraction is still running. This panel will update when extraction finishes."
+                  : notamWorkspace.pending
                   ? "Pending extraction row — edit flight plan JSON and save to sync."
                   : "Upload and parse a flight plan to create a pending extraction, or rely on saved flight plan JSON count below."}{" "}
                 <span className="font-medium text-foreground">
@@ -130,6 +149,16 @@ export default function NotamAnalysisPanel({
               {analyseBusy ? "Analysing…" : "Analyse NOTAMs"}
             </Button>
           </div>
+
+          {extractionPending ? (
+            <div className="space-y-2 rounded-lg border border-dashed border-border bg-card/50 p-4">
+              <Skeleton className="h-3 w-full max-w-md" />
+              <Skeleton className="h-3 w-full max-w-lg" />
+              <p className="text-xs text-muted-foreground">
+                Waiting for NOTAM extraction to finish before analysis can run.
+              </p>
+            </div>
+          ) : null}
 
           {!notamWorkspace.pending && savedNotamCount === 0 ? (
             <p className="text-sm text-muted-foreground">
@@ -202,10 +231,10 @@ export default function NotamAnalysisPanel({
                       {CATEGORY_HEADLINE[cat]}
                     </h3>
                     <ul className="space-y-2">
-                      {group.map((n) => {
+                      {group.map((n, idx) => {
                         const styles = notamCategoryStyles(n.category);
                         return (
-                          <li key={n.id}>
+                          <li key={`${n.id ?? "unknown"}-${n.category}-${idx}`}>
                             <button
                               type="button"
                               onClick={() => setDetailNotam(n)}
@@ -217,9 +246,9 @@ export default function NotamAnalysisPanel({
                             >
                               <div className="flex flex-wrap items-start justify-between gap-2">
                                 <div className="min-w-0 space-y-1">
-                                  <p className="truncate text-sm font-medium">{n.title}</p>
+                                  <p className="truncate text-sm font-medium">{n.title ?? "Unknown NOTAM"}</p>
                                   <p className="font-mono text-xs text-muted-foreground">
-                                    {n.id} · {n.a}
+                                    {n.id ?? "—"} · {n.a ?? "—"}
                                   </p>
                                 </div>
                                 <Badge
@@ -265,7 +294,7 @@ export default function NotamAnalysisPanel({
             <>
               <DialogHeader>
                 <div className="flex flex-wrap items-start justify-between gap-2">
-                  <DialogTitle className="pr-8 text-base">{detailNotam.title}</DialogTitle>
+                  <DialogTitle className="pr-8 text-base">{detailNotam.title ?? "Unknown NOTAM"}</DialogTitle>
                   <Badge
                     variant="outline"
                     className={cn(
@@ -277,7 +306,7 @@ export default function NotamAnalysisPanel({
                   </Badge>
                 </div>
                 <DialogDescription className="font-mono text-xs">
-                  {detailNotam.id} · {detailNotam.a}
+                  {detailNotam.id ?? "—"} · {detailNotam.a ?? "—"}
                 </DialogDescription>
               </DialogHeader>
 

@@ -48,7 +48,6 @@ function formStateFromFlight(flight: FlightDetail) {
     route: flight.route ?? "",
     aircraft_weight: flight.aircraft_weight != null ? String(flight.aircraft_weight) : "",
     status: isFlightStatus(flight.status) ? flight.status : "",
-    flight_plan_pdf_text: flight.flight_plan_pdf_text ?? "",
     flight_plan_json: flight.flight_plan_json
       ? JSON.stringify(flight.flight_plan_json, null, 2)
       : "",
@@ -70,7 +69,6 @@ function applyParseToFormState(res: FlightPlanParseApiResponse): FormState {
     route: f.route ?? "",
     aircraft_weight: f.aircraft_weight != null ? String(f.aircraft_weight) : "",
     status: isFlightStatus(f.status) ? f.status : "",
-    flight_plan_pdf_text: f.flight_plan_pdf_text ?? "",
     flight_plan_json: f.flight_plan_json
       ? JSON.stringify(f.flight_plan_json, null, 2)
       : "",
@@ -141,15 +139,20 @@ export default function FlightWorkspace({
     setParsePending(true);
     try {
       const file = fileInputRef.current?.files?.[0];
+      if (!file) {
+        setParseError("Please select a PDF file before parsing.");
+        return;
+      }
+
       const init: RequestInit = {
         method: "POST",
         credentials: "same-origin",
       };
-      if (file) {
-        const fd = new FormData();
-        fd.append("file", file);
-        init.body = fd;
-      }
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("aircraftId", flight.aircraft_id);
+      fd.append("organisationId", organisationId);
+      init.body = fd;
 
       const res = await fetch(`/api/flights/${flight.id}/parse-flight-plan`, init);
       const body = (await res.json()) as FlightPlanParseApiResponse | { ok?: false; error?: string };
@@ -198,9 +201,8 @@ export default function FlightWorkspace({
         <CardHeader>
           <CardTitle>Flight plan</CardTitle>
           <CardDescription>
-            Upload a PDF to run extraction (dummy implementation for now). The parse API
-            writes flight fields and a pending NOTAM extraction row, then returns the same
-            payload for the form.
+            Upload a flight plan PDF to extract fields and seed NOTAM analysis.
+            Any uncertain fields are highlighted for manual review.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -226,9 +228,6 @@ export default function FlightWorkspace({
             >
               {parsePending ? "Parsing…" : "Upload and parse"}
             </Button>
-            <p className="text-xs text-muted-foreground sm:max-w-md">
-              Optional file: omit it to run the same dummy parse without attaching a PDF.
-            </p>
           </div>
         </CardContent>
       </Card>
@@ -381,22 +380,6 @@ export default function FlightWorkspace({
                 "dark:bg-input/30",
               )}
               placeholder="Route string from the flight plan"
-            />
-          </FieldBlock>
-
-          <FieldBlock
-            label="Flight plan text (extracted)"
-            needsReview={review("flight_plan_pdf_text")}
-          >
-            <textarea
-              value={form.flight_plan_pdf_text}
-              onChange={(e) => setField("flight_plan_pdf_text", e.target.value)}
-              rows={4}
-              className={cn(
-                "field-sizing-content min-h-24 w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-xs outline-none",
-                "placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50",
-                "dark:bg-input/30",
-              )}
             />
           </FieldBlock>
 
