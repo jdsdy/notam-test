@@ -25,6 +25,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { AnalysedNotam } from "@/lib/notams";
 import { notamCategoryStyles } from "@/lib/notams";
+import NotamFeedbackForm from "@/components/app/notam-feedback-form";
 import { cn } from "@/lib/utils";
 
 const CATEGORY_HEADLINE: Record<1 | 2 | 3, string> = {
@@ -293,7 +294,7 @@ export default function NotamAnalysisPanel({
           if (!open) setDetailNotam(null);
         }}
       >
-        <DialogContent className="max-h-[min(90vh,720px)] w-full max-w-lg overflow-y-auto sm:max-w-xl">
+        <DialogContent className="max-h-[min(90vh,800px)] w-full max-w-lg overflow-y-auto sm:max-w-2xl">
           {detailNotam ? (
             <>
               <DialogHeader>
@@ -330,6 +331,12 @@ export default function NotamAnalysisPanel({
                 {detailNotam.f ? <DetailField label="Lower limit (F)" value={detailNotam.f} /> : null}
                 {detailNotam.g ? <DetailField label="Upper limit (G)" value={detailNotam.g} /> : null}
               </div>
+
+              <NotamFeedbackForm
+                organisationId={organisationId}
+                flightId={flightId}
+                notam={detailNotam}
+              />
             </>
           ) : null}
         </DialogContent>

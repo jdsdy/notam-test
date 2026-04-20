@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import DashboardFeedbackCard from "@/components/app/dashboard-feedback-card";
 import ProfileNameForm from "@/components/app/profile-name-form";
 import { buttonVariants } from "@/components/ui/button";
 import {
@@ -91,6 +92,10 @@ export default async function AppHomePage() {
             Founding an organisation makes you an administrator for that org.
           </CardFooter>
         </Card>
+      </div>
+
+      <div className="mt-10">
+        <DashboardFeedbackCard organisations={organisations} />
       </div>
     </main>
   );

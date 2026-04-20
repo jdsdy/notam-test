@@ -15,7 +15,7 @@ export type FlightPlanParsedFields = {
   flight_plan_json: Record<string, unknown> | null;
   /** Supplemental extraction notes useful for NOTAM analysis and operator context. */
   flight_metadata?: Record<string, unknown> | null;
-  /** Anthropic Files API identifier for the uploaded flight plan PDF. */
+  /** UUID for the uploaded flight plan PDF in Supabase Storage (`flight_plan_uploads`). */
   pdf_file_id?: string | null;
 };
 

@@ -27,6 +27,26 @@ import { extractPdfText } from "@/lib/pdf-parse-server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const FILES_API_BETA = "files-api-2025-04-14";
+const FLIGHT_PLAN_UPLOADS_BUCKET = "flight_plan_uploads";
+
+async function persistOriginalFlightPlanPdf(args: {
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  organisationId: string;
+  planPdfUuid: string;
+  originalPdfBytes: Uint8Array;
+}): Promise<void> {
+  const objectPath = `${args.organisationId}/${args.planPdfUuid}.pdf`;
+  const { error } = await args.supabase.storage
+    .from(FLIGHT_PLAN_UPLOADS_BUCKET)
+    .upload(objectPath, args.originalPdfBytes, {
+      contentType: "application/pdf",
+    });
+  if (error) {
+    throw new Error(
+      `Failed to store flight plan PDF: ${error.message ?? "unknown error"}`,
+    );
+  }
+}
 
 const FLIGHT_DATA_FALLBACK_PARTIAL: FlightDataExtractionPartial = {
   departure_icao: null,
@@ -269,46 +289,74 @@ export async function POST(
 
   try {
     const originalPdfBytes = new Uint8Array(await file.arrayBuffer());
-    const normalizedPdfFilename = `${crypto.randomUUID()}.pdf`;
+    const planPdfUuid = crypto.randomUUID();
+    const normalizedPdfFilename = `${planPdfUuid}.pdf`;
 
-    const originalUploaded = await anthropic.beta.files.upload({
-      file: await toFile(file, normalizedPdfFilename, {
-        type: file.type || "application/pdf",
+    const extractPersistedFields = async (): Promise<{
+      fields: ReturnType<typeof buildPersistedFields>["fields"];
+      needsManualReview: ReturnType<typeof buildPersistedFields>["needsManualReview"];
+      notamBatchPdfs: Uint8Array[];
+    }> => {
+      const originalUploaded = await anthropic.beta.files.upload({
+        file: await toFile(originalPdfBytes, normalizedPdfFilename, {
+          type: file.type || "application/pdf",
+        }),
+        betas: [FILES_API_BETA],
+      });
+      uploadedFileIds.push(originalUploaded.id);
+
+      const splitterResult = await runPdfSplitterAgent({
+        anthropic,
+        originalFileId: originalUploaded.id,
+        originalPdfBytes,
+      });
+      const { flightDetailsPdf, notamBatchPdfs } = await splitPdfBySplitterResult(
+        originalPdfBytes,
+        splitterResult,
+      );
+
+      const flightDataPartial = flightDetailsPdf
+        ? await (async () => {
+            const flightDetailsFileId = await uploadPdfBytes({
+              anthropic,
+              bytes: flightDetailsPdf,
+              label: "flight-details",
+              uploadedFileIds,
+            });
+            return await runFlightDataExtractionAgent({
+              anthropic,
+              flightDataFileId: flightDetailsFileId,
+            });
+          })()
+        : FLIGHT_DATA_FALLBACK_PARTIAL;
+
+      const flightExtraction = buildFullExtractionFromFlightData(flightDataPartial);
+      const { fields, needsManualReview } = buildPersistedFields(
+        flightExtraction,
+        planPdfUuid,
+      );
+
+      return { fields, needsManualReview, notamBatchPdfs };
+    };
+
+    const [storageOutcome, extractionOutcome] = await Promise.allSettled([
+      persistOriginalFlightPlanPdf({
+        supabase,
+        organisationId,
+        planPdfUuid,
+        originalPdfBytes,
       }),
-      betas: [FILES_API_BETA],
-    });
-    uploadedFileIds.push(originalUploaded.id);
+      extractPersistedFields(),
+    ]);
 
-    const splitterResult = await runPdfSplitterAgent({
-      anthropic,
-      originalFileId: originalUploaded.id,
-      originalPdfBytes,
-    });
-    const { flightDetailsPdf, notamBatchPdfs } = await splitPdfBySplitterResult(
-      originalPdfBytes,
-      splitterResult,
-    );
+    if (storageOutcome.status === "rejected") {
+      throw storageOutcome.reason;
+    }
+    if (extractionOutcome.status === "rejected") {
+      throw extractionOutcome.reason;
+    }
 
-    const flightDataPartial = flightDetailsPdf
-      ? await (async () => {
-          const flightDetailsFileId = await uploadPdfBytes({
-            anthropic,
-            bytes: flightDetailsPdf,
-            label: "flight-details",
-            uploadedFileIds,
-          });
-          return await runFlightDataExtractionAgent({
-            anthropic,
-            flightDataFileId: flightDetailsFileId,
-          });
-        })()
-      : FLIGHT_DATA_FALLBACK_PARTIAL;
-
-    const flightExtraction = buildFullExtractionFromFlightData(flightDataPartial);
-    const { fields, needsManualReview } = buildPersistedFields(
-      flightExtraction,
-      originalUploaded.id,
-    );
+    const { fields, needsManualReview, notamBatchPdfs } = extractionOutcome.value;
 
     const applyResult = await applyParsedFlightPlanToFlight(
       supabase,

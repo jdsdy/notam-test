@@ -45,7 +45,7 @@ const FLIGHT_DATA_FALLBACK_PARTIAL: FlightDataExtractionPartial = {
 export type FlightPlanOrchestrationResult = {
   /** Complete extraction that conforms to the full output schema. */
   extraction: FlightPlanExtraction;
-  /** Anthropic Files API id for the original uploaded PDF (used for persistence). */
+  /** Random UUID used as the canonical id for the original PDF filename (not an Anthropic file id). */
   pdfFileId: string;
 };
 
@@ -90,10 +90,11 @@ export async function runFlightPlanExtractionPipeline(args: {
 
   try {
     const originalPdfBytes = new Uint8Array(await file.arrayBuffer());
-    const normalizedPdfFilename = `${crypto.randomUUID()}.pdf`;
+    const planPdfUuid = crypto.randomUUID();
+    const normalizedPdfFilename = `${planPdfUuid}.pdf`;
 
     const originalUploaded = await anthropic.beta.files.upload({
-      file: await toFile(file, normalizedPdfFilename, {
+      file: await toFile(originalPdfBytes, normalizedPdfFilename, {
         type: file.type || "application/pdf",
       }),
       betas: [FILES_API_BETA],
@@ -149,7 +150,7 @@ export async function runFlightPlanExtractionPipeline(args: {
       flightDataPartial,
     });
 
-    return { extraction, pdfFileId: originalFileId };
+    return { extraction, pdfFileId: planPdfUuid };
   } finally {
     if (uploadedFileIds.length > 0) {
       await Promise.allSettled(

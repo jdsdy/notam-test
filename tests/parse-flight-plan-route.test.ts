@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   uploadFile: vi.fn(),
   deleteFile: vi.fn(),
   extractPdfText: vi.fn(),
+  storageUpload: vi.fn(),
 
   createSupabaseServerClient: vi.fn(),
   getCurrentUser: vi.fn(),
@@ -125,6 +126,11 @@ describe("POST /api/flights/[flightId]/parse-flight-plan", () => {
       },
     });
 
+    mocks.storageUpload.mockResolvedValue({
+      data: { path: "org-1/mock.pdf" },
+      error: null,
+    });
+
     mocks.createSupabaseServerClient.mockResolvedValue({
       auth: {
         getUser: vi.fn().mockResolvedValue({
@@ -134,6 +140,11 @@ describe("POST /api/flights/[flightId]/parse-flight-plan", () => {
       from: vi.fn().mockReturnValue({
         select: mockSelect,
       }),
+      storage: {
+        from: vi.fn().mockReturnValue({
+          upload: mocks.storageUpload,
+        }),
+      },
     });
     mocks.getCurrentUser.mockImplementation(() => {
       throw new Error("Route must validate with supabase.auth.getUser()");
@@ -241,12 +252,17 @@ describe("POST /api/flights/[flightId]/parse-flight-plan", () => {
     expect(body.fields.departure_icao).toBe("YSSY");
     expect(body.fields.arrival_rwy).toBeNull();
     expect(body.fields.status).toBe("draft");
-    expect(body.fields.pdf_file_id).toBe("file_original");
+    expect(body.fields.pdf_file_id).toBe("123e4567-e89b-12d3-a456-426614174000");
     expect(body.fields.flight_plan_json).toBeNull();
     expect(body.fields.flight_metadata).toEqual({ cruise_altitude: "FL320" });
     expect(body.notamAnalysisId).toBe("na-pending");
     expect(body.notamsIdentified).toEqual([]);
 
+    expect(mocks.storageUpload).toHaveBeenCalledWith(
+      "org-1/123e4567-e89b-12d3-a456-426614174000.pdf",
+      expect.any(Uint8Array),
+      expect.objectContaining({ contentType: "application/pdf" }),
+    );
     expect(mocks.uploadFile).toHaveBeenCalledTimes(2);
     expect(mocks.uploadFile).toHaveBeenNthCalledWith(
       1,
@@ -254,7 +270,7 @@ describe("POST /api/flights/[flightId]/parse-flight-plan", () => {
     );
     expect(mocks.toFile).toHaveBeenNthCalledWith(
       1,
-      expect.anything(),
+      expect.any(Uint8Array),
       "123e4567-e89b-12d3-a456-426614174000.pdf",
       expect.objectContaining({ type: "application/pdf" }),
     );
@@ -290,7 +306,7 @@ describe("POST /api/flights/[flightId]/parse-flight-plan", () => {
         arrival_icao: "YMML",
         arrival_rwy: null,
         status: "draft",
-        pdf_file_id: "file_original",
+        pdf_file_id: "123e4567-e89b-12d3-a456-426614174000",
       }),
     );
     expect(mocks.markPendingNotamExtraction).toHaveBeenCalledWith(

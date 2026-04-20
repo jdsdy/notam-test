@@ -105,7 +105,8 @@ function applyManualReviewMask(
 
 export function buildPersistedFields(
   extracted: FlightPlanExtraction,
-  pdfFileId: string,
+  /** UUID used as the object name under `{organisation_id}/{uuid}.pdf` in `flight_plan_uploads`. */
+  planPdfStorageUuid: string,
 ): { fields: FlightPlanParsedFields; needsManualReview: FlightPlanFieldKey[] } {
   const needsManualReview: FlightPlanParserUnidentifiedFieldKey[] = [
     ...new Set(
@@ -131,7 +132,7 @@ export function buildPersistedFields(
     status: "draft",
     flight_plan_json: null,
     flight_metadata: normalizeJsonRecord(extracted.flight_metadata),
-    pdf_file_id: normalizeString(pdfFileId),
+    pdf_file_id: normalizeString(planPdfStorageUuid),
   };
 
   return {

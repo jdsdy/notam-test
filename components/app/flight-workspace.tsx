@@ -4,6 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 
 import { updateFlightPlanFieldsFromFormAction } from "@/app/actions/flight";
+import FlightFeedbackCard from "@/components/app/flight-feedback-card";
 import NotamAnalysisPanel from "@/components/app/notam-analysis-panel";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -404,6 +405,8 @@ export default function FlightWorkspace({
           </div>
         </CardContent>
       </Card>
+
+      <FlightFeedbackCard organisationId={organisationId} flightId={flight.id} />
 
       <Separator />
 
