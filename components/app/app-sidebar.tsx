@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { signOut } from "@/app/actions/auth";
-import { JetOpsMark } from "@/components/brand/jet-ops-mark";
+import { JetOpsLogoIcon, JetOpsMark } from "@/components/brand/jet-ops-mark";
 import { Button, buttonVariants } from "@/components/ui/button";
 import type { OrganisationSummary } from "@/lib/organisations";
 import { cn } from "@/lib/utils";
@@ -108,11 +108,7 @@ export default function AppSidebar({ user, organisations }: Props) {
         {/* Brand row */}
         <div className="flex items-center justify-between gap-2 px-4 pt-5 pb-4">
           {collapsed ? (
-            <span className="grid h-9 w-9 place-items-center rounded-xl bg-[oklch(0.22_0.04_285)] text-primary-foreground ring-1 ring-[oklch(1_0_0_/_0.15)]">
-              <span className="font-heading text-lg leading-none">
-                J<span className="text-amber-200/90">°</span>
-              </span>
-            </span>
+            <JetOpsLogoIcon size={36} className="h-9 w-9" />
           ) : (
             <JetOpsMark tagline="Private MVP" />
           )}

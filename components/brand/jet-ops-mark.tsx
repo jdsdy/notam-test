@@ -1,11 +1,32 @@
-import * as React from "react";
+import Image from "next/image";
 
+import logo from "@/assets/jetops_logo.png";
 import { cn } from "@/lib/utils";
 
+/** Square mark only — used where the full wordmark is too wide (e.g. collapsed sidebar). */
+export function JetOpsLogoIcon({
+  className,
+  size = 36,
+}: {
+  className?: string;
+  /** Display size in CSS pixels (image is 500×500). */
+  size?: number;
+}) {
+  return (
+    <Image
+      src={logo}
+      alt="Jet Ops"
+      width={size}
+      height={size}
+      className={cn("shrink-0 object-contain", className)}
+      priority={false}
+    />
+  );
+}
+
 /**
- * JetOps wordmark: capital "J" on a plinth next to the wordmark in sans.
- * next to the rest of the name in the body sans. Used in the sidebar, auth
- * card, and marketing nav so the brand feels coherent across surfaces.
+ * Jet Ops brand mark: logo image + wordmark and optional tagline.
+ * Used in the sidebar, auth header, marketing nav, and footer.
  */
 export function JetOpsMark({
   className,
@@ -16,11 +37,7 @@ export function JetOpsMark({
 }) {
   return (
     <div className={cn("flex items-center gap-3", className)}>
-      <span className="relative grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[oklch(0.22_0.04_285)] text-primary-foreground shadow-soft ring-1 ring-[oklch(1_0_0_/_0.15)]">
-        <span className="font-heading text-lg leading-none tracking-tight">
-          J<span className="text-amber-200/90">°</span>
-        </span>
-      </span>
+      <JetOpsLogoIcon size={36} className="h-9 w-9" />
       <div className="flex flex-col leading-tight">
         <span className="font-heading text-[1.05rem] tracking-tight text-foreground">
           Jet<span className="italic text-[oklch(0.4_0.14_285)]"> Ops</span>

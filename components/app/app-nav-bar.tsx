@@ -4,6 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 
 import { signOut } from "@/app/actions/auth";
+import { JetOpsMark } from "@/components/brand/jet-ops-mark";
 import { buttonVariants } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
@@ -23,11 +24,8 @@ export default function AppNavBar({ email }: { email: string }) {
   return (
     <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/80">
       <div className="mx-auto flex h-14 max-w-5xl items-center gap-4 px-4 sm:px-6">
-        <Link
-          href="/"
-          className="font-heading text-sm font-medium tracking-tight text-foreground"
-        >
-          Jet Ops
+        <Link href="/" className="shrink-0 scale-95 origin-left">
+          <JetOpsMark />
         </Link>
         <Separator orientation="vertical" className="hidden h-6 sm:block" />
         <nav className="flex flex-1 items-center gap-2 text-sm">

@@ -3,16 +3,20 @@ import Anthropic, { toFile } from "@anthropic-ai/sdk";
 
 import type { FlightPlanParseApiResponse } from "@/lib/flight-plan-parse";
 import { runFlightDataExtractionAgent } from "@/lib/flight-plan/agents/flight-data-extraction";
+import { runFlightRouteWeatherTableAgent } from "@/lib/flight-plan/agents/flight-route-weather-extraction";
 import { runNotamExtractionOnTextChunks } from "@/lib/flight-plan/notam-text-split";
 import {
   runPdfSplitterAgent,
   splitPdfBySplitterResult,
 } from "@/lib/flight-plan/agents/pdf-splitter";
+import { mergeFlightDataPartials } from "@/lib/flight-plan/merge-flight-data";
 import { buildPersistedFields, extractedNotamsToRawPayload } from "@/lib/flight-plan/normalize";
-import type {
-  FlightDataExtractionPartial,
-  FlightPlanExtraction,
-  NotamExtractionPartial,
+import {
+  type FlightDataExtractionPartial,
+  type FlightPlanExtraction,
+  type NotamExtractionPartial,
+  FLIGHT_DATA_CORE_FALLBACK,
+  ROUTE_PARTIAL_WHEN_NO_TABLE_PDF,
 } from "@/lib/flight-plan/schemas";
 import {
   assertAircraftBelongsToOrganisation,
@@ -47,32 +51,6 @@ async function persistOriginalFlightPlanPdf(args: {
     );
   }
 }
-
-const FLIGHT_DATA_FALLBACK_PARTIAL: FlightDataExtractionPartial = {
-  departure_icao: null,
-  arrival_icao: null,
-  departure_time: null,
-  arrival_time: null,
-  time_enroute: null,
-  departure_rwy: null,
-  arrival_rwy: null,
-  route: null,
-  aircraft_weight: null,
-  flight_plan_json: { primary: [], alternate: [] },
-  flight_metadata: null,
-  unidentified_fields: [
-    "departure_icao",
-    "arrival_icao",
-    "departure_time",
-    "arrival_time",
-    "time_enroute",
-    "departure_rwy",
-    "arrival_rwy",
-    "route",
-    "aircraft_weight",
-    "flight_plan_json",
-  ],
-};
 
 function buildFullExtractionFromFlightData(
   partial: FlightDataExtractionPartial,
@@ -310,25 +288,48 @@ export async function POST(
         originalFileId: originalUploaded.id,
         originalPdfBytes,
       });
-      const { flightDetailsPdf, notamBatchPdfs } = await splitPdfBySplitterResult(
-        originalPdfBytes,
-        splitterResult,
-      );
+      const { flightDetailsPdf, routeWeatherTablePdf, notamBatchPdfs } =
+        await splitPdfBySplitterResult(originalPdfBytes, splitterResult);
 
-      const flightDataPartial = flightDetailsPdf
-        ? await (async () => {
+      const routePartialPromise = routeWeatherTablePdf
+        ? (async () => {
+            const routeTableFileId = await uploadPdfBytes({
+              anthropic,
+              bytes: routeWeatherTablePdf,
+              label: "route-weather-table",
+              uploadedFileIds,
+            });
+            return runFlightRouteWeatherTableAgent({
+              anthropic,
+              routeTableFileId,
+            });
+          })()
+        : Promise.resolve(ROUTE_PARTIAL_WHEN_NO_TABLE_PDF);
+
+      const corePartialPromise = flightDetailsPdf
+        ? (async () => {
             const flightDetailsFileId = await uploadPdfBytes({
               anthropic,
               bytes: flightDetailsPdf,
               label: "flight-details",
               uploadedFileIds,
             });
-            return await runFlightDataExtractionAgent({
+            return runFlightDataExtractionAgent({
               anthropic,
               flightDataFileId: flightDetailsFileId,
             });
           })()
-        : FLIGHT_DATA_FALLBACK_PARTIAL;
+        : Promise.resolve(FLIGHT_DATA_CORE_FALLBACK);
+
+      const [corePartial, routePartial] = await Promise.all([
+        corePartialPromise,
+        routePartialPromise,
+      ]);
+
+      const flightDataPartial = mergeFlightDataPartials(
+        corePartial,
+        routePartial,
+      );
 
       const flightExtraction = buildFullExtractionFromFlightData(flightDataPartial);
       const { fields, needsManualReview } = buildPersistedFields(

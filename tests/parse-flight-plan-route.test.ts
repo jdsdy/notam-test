@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   splitPdfBySplitterResult: vi.fn(),
   runNotamExtractionAgent: vi.fn(),
   runFlightDataExtractionAgent: vi.fn(),
+  runFlightRouteWeatherTableAgent: vi.fn(),
 }));
 
 vi.mock("@anthropic-ai/sdk", () => ({
@@ -62,6 +63,10 @@ vi.mock("@/lib/flight-plan/agents/notam-extraction", () => ({
 
 vi.mock("@/lib/flight-plan/agents/flight-data-extraction", () => ({
   runFlightDataExtractionAgent: mocks.runFlightDataExtractionAgent,
+}));
+
+vi.mock("@/lib/flight-plan/agents/flight-route-weather-extraction", () => ({
+  runFlightRouteWeatherTableAgent: mocks.runFlightRouteWeatherTableAgent,
 }));
 
 import { POST } from "@/app/api/flights/[flightId]/parse-flight-plan/route";
@@ -154,6 +159,7 @@ describe("POST /api/flights/[flightId]/parse-flight-plan", () => {
     mocks.toFile.mockResolvedValue({ any: "file" });
     mocks.uploadFile
       .mockResolvedValueOnce({ id: "file_original" })
+      .mockResolvedValueOnce({ id: "file_route" })
       .mockResolvedValueOnce({ id: "file_flight" });
     mocks.deleteFile.mockResolvedValue({ id: "deleted", type: "file_deleted" });
     mocks.extractPdfText.mockResolvedValue("NOTAM TEXT FROM PDF");
@@ -162,13 +168,20 @@ describe("POST /api/flights/[flightId]/parse-flight-plan", () => {
       notamGroups: [
         { pages: [1, 2, 3], notamCount: 2, startId: "A1/26", endId: "B2/26" },
       ],
-      windMapPages: [4],
-      flightDetailPages: [4, 5, 6],
+      windMapPages: [],
+      routeWeatherTablePages: [4],
+      flightDetailPages: [5, 6],
     });
 
     mocks.splitPdfBySplitterResult.mockResolvedValue({
       flightDetailsPdf: new Uint8Array([0x25, 0x50, 0x44, 0x46]),
+      routeWeatherTablePdf: new Uint8Array([0x03]),
       notamBatchPdfs: [new Uint8Array([0x01, 0x02, 0x03])],
+    });
+
+    mocks.runFlightRouteWeatherTableAgent.mockResolvedValue({
+      route: "YSSY DCT YMML",
+      unidentified_fields: [],
     });
 
     mocks.runFlightDataExtractionAgent.mockResolvedValue({
@@ -179,7 +192,6 @@ describe("POST /api/flights/[flightId]/parse-flight-plan", () => {
       time_enroute: 180,
       departure_rwy: "16R",
       arrival_rwy: "27",
-      route: "YSSY DCT YMML",
       aircraft_weight: 18000,
       flight_plan_json: { primary: [], alternate: [] },
       flight_metadata: { cruise_altitude: "FL320" },
@@ -263,7 +275,7 @@ describe("POST /api/flights/[flightId]/parse-flight-plan", () => {
       expect.any(Uint8Array),
       expect.objectContaining({ contentType: "application/pdf" }),
     );
-    expect(mocks.uploadFile).toHaveBeenCalledTimes(2);
+    expect(mocks.uploadFile).toHaveBeenCalledTimes(3);
     expect(mocks.uploadFile).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({ betas: ["files-api-2025-04-14"] }),
@@ -284,7 +296,8 @@ describe("POST /api/flights/[flightId]/parse-flight-plan", () => {
         notamGroups: expect.arrayContaining([
           expect.objectContaining({ pages: [1, 2, 3] }),
         ]),
-        flightDetailPages: [4, 5, 6],
+        routeWeatherTablePages: [4],
+        flightDetailPages: [5, 6],
       }),
     );
 
@@ -293,6 +306,9 @@ describe("POST /api/flights/[flightId]/parse-flight-plan", () => {
       expect.objectContaining({
         notamText: "NOTAM TEXT FROM PDF",
       }),
+    );
+    expect(mocks.runFlightRouteWeatherTableAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ routeTableFileId: "file_route" }),
     );
     expect(mocks.runFlightDataExtractionAgent).toHaveBeenCalledWith(
       expect.objectContaining({ flightDataFileId: "file_flight" }),
@@ -326,9 +342,9 @@ describe("POST /api/flights/[flightId]/parse-flight-plan", () => {
       }),
     );
 
-    expect(mocks.deleteFile).toHaveBeenCalledTimes(2);
+    expect(mocks.deleteFile).toHaveBeenCalledTimes(3);
     const deletedIds = mocks.deleteFile.mock.calls.map((call) => call[0]).sort();
-    expect(deletedIds).toEqual(["file_flight", "file_original"]);
+    expect(deletedIds).toEqual(["file_flight", "file_original", "file_route"]);
     for (const call of mocks.deleteFile.mock.calls) {
       expect(call[1]).toEqual(
         expect.objectContaining({ betas: ["files-api-2025-04-14"] }),

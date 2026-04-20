@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import OrgAircraftFleet from "@/components/app/org-aircraft-fleet";
 import OrgFlightsCard from "@/components/app/org-flights-card";
-import OrgMembersList from "@/components/app/org-members-list";
+import OrgFleetSummaryCard from "@/components/app/org-fleet-summary-card";
+import OrgMembersSummaryCard from "@/components/app/org-members-summary-card";
 import { buttonVariants } from "@/components/ui/button";
 import { listAircraftForOrganisation } from "@/lib/aircraft";
 import { listFlightsForOrganisation } from "@/lib/flights";
@@ -88,12 +88,12 @@ export default async function OrganisationManagePage({ params }: PageProps) {
       </header>
 
       <section className="rise-in rise-in-2 grid gap-6 lg:grid-cols-2">
-        <OrgAircraftFleet
+        <OrgFleetSummaryCard organisationId={organisationId} count={aircraft.length} />
+        <OrgMembersSummaryCard
           organisationId={organisationId}
-          aircraft={aircraft}
-          canManage={canManageFleet}
+          memberCount={members.length}
+          adminCount={admins.length}
         />
-        <OrgMembersList members={members} adminCount={admins.length} />
       </section>
 
       <section className="rise-in rise-in-3">

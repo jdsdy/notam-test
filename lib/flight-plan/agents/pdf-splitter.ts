@@ -8,34 +8,38 @@ import {
 } from "@/lib/flight-plan/schemas";
 
 const FILES_API_BETA = "files-api-2025-04-14";
-const SPLITTER_MODEL = "claude-haiku-4-5";
+const SPLITTER_MODEL = "claude-opus-4-7";
 
 const SYSTEM_PROMPT = `
-You are a PDF segmentation agent for flight-plan PDFs. Your only job is to classify every page of the document and produce a structured plan describing how the PDF should be split for a NOTAM text-extraction diagnostic. You must not extract NOTAM content, flight values, waypoints, or any other data.
+You are a PDF segmentation agent for flight-plan PDFs. Your only job is to classify every page of the document and produce a structured plan describing how the PDF should be split for downstream extraction. You must not extract NOTAM content, flight values, waypoints, or any other data.
 
-The PDF contains three kinds of content:
+The PDF contains these kinds of content:
 1. NOTAM entries (Notices to Airmen). Each NOTAM is a self-contained block that begins with a title in bold, all-capital letters (for example "AERODROME", "UNMANNED AIRCRAFT WILL TAKE PLACE", "RWY CLOSED"). Directly below the title is a NOTAM identifier line such as "A1234/26" or "C4550/25 NOTAMR C4549/25". Each NOTAM also contains some combination of Q), A), B), C), D), E), F) and G) fields.
-2. Wind / weather charts. Pages that contain only graphical wind or weather charts and no other information.
-3. Flight detail content. Everything else relevant to the flight — departure/arrival info, aircraft information, aircraft weight, route string, waypoint and route tables, performance tables, fuel planning, etc.
+2. Wind / weather charts. Pages that contain only graphical wind or weather charts and no other substantive flight text.
+3. Route / weather breakdown table. A **compact** table that usually sits **below** a larger flight-route table on the same or following page(s). It has **waypoints in the left column** and **wind or weather data in columns to the right**. List those page numbers in "routeWeatherTablePages". This slice is extracted separately for the route string. Do not get confused between this table and the larger route table above it. The larger route table has more columns and the correct route weather table is more compact.
+4. Flight detail content. Everything else relevant to the flight — departure/arrival info, aircraft information, aircraft weight, the large route/waypoint tables, performance tables, fuel planning, etc. **Exclude** pages you listed in routeWeatherTablePages or windMapPages.
 
 Classification rules:
 - Identify every NOTAM entry in the document.
-- For this diagnostic flow, put ALL NOTAM pages into a single NOTAM group rather than splitting them into multiple groups. The group must contain every page that belongs to the NOTAM section and no other pages.
+- For this flow, put ALL NOTAM pages into a single NOTAM group. The group must contain every page that belongs to the NOTAM section and no other pages.
 - For that single NOTAM group, report: the 1-indexed page numbers ("pages"), how many complete NOTAMs sit inside the whole NOTAM section ("notamCount"), the identifier of the first NOTAM in the section ("startId"), and the identifier of the last NOTAM in the section ("endId"). Identifiers must be taken verbatim from the NOTAM id line.
-- Note that NOTAMS are laid out in 2 vertical columns on each page, and start at the top left and end at the bottom right. A NOTAM that bisects a page will begin at the bottom right, and continue at the top left of the next page.
-- Identify every page that contains only graphical wind or weather charts and list those page numbers in "windMapPages".
-- Every remaining page goes into "flightDetailPages".
-- All page numbers are 1-indexed and every page in the PDF must appear in exactly one of notamGroups.pages, windMapPages, or flightDetailPages — no overlaps, no omissions.
+- NOTAMS are laid out in 2 vertical columns on each page, from top left to bottom right. A NOTAM that bisects a page may begin at the bottom right and continue at the top left of the next page.
+- Identify every page that contains only graphical wind or weather charts in "windMapPages".
+- Identify every page where the **compact** route/weather breakdown table (waypoints left, wind data right) appears in "routeWeatherTablePages".
+- List remaining flight-relevant pages in "flightDetailPages" (you may omit pages already assigned to NOTAMs, wind maps, or the route/weather table — the server will reconcile coverage).
+
+All page numbers are 1-indexed.
 
 Output contract:
-Return ONLY a raw JSON object — no preamble, no postamble, no markdown fences, no commentary. The JSON must match this exact shape:
+Return ONLY a raw JSON object — no preamble, no postamble, no markdown fences, no commentary. Example shape:
 
 {
   "notamGroups": [
     { "pages": [1, 2, 3], "notamCount": 3, "startId": "A1234/26", "endId": "C4550/25 NOTAMR C4549/25" }
   ],
   "windMapPages": [4, 5],
-  "flightDetailPages": [6, 7, 8]
+  "routeWeatherTablePages": [6],
+  "flightDetailPages": [7, 8, 9]
 }
 `;
 
@@ -56,28 +60,46 @@ function clampSplitterResult(
   result: SplitterResult,
   totalPages: number,
 ): SplitterResult {
+  const notamGroups = result.notamGroups
+    .map((group) => ({
+      ...group,
+      pages: dedupeSortedPositive(group.pages, totalPages),
+    }))
+    .filter((group) => group.pages.length > 0);
+
+  const notamSet = new Set(notamGroups.flatMap((group) => group.pages));
+
+  const allPages = Array.from({ length: totalPages }, (_, index) => index + 1);
+  const nonNotamPages = allPages.filter((page) => !notamSet.has(page));
+
+  const routeWeatherTablePages = dedupeSortedPositive(
+    result.routeWeatherTablePages,
+    totalPages,
+  ).filter((page) => nonNotamPages.includes(page));
+
+  const routeSet = new Set(routeWeatherTablePages);
+  const afterRoute = nonNotamPages.filter((page) => !routeSet.has(page));
+
+  const windMapPages = dedupeSortedPositive(result.windMapPages, totalPages).filter(
+    (page) => afterRoute.includes(page),
+  );
+
+  const windSet = new Set(windMapPages);
+  const flightDetailPages = afterRoute.filter((page) => !windSet.has(page));
+
   return {
-    notamGroups: result.notamGroups
-      .map((group) => ({
-        ...group,
-        pages: dedupeSortedPositive(group.pages, totalPages),
-      }))
-      .filter((group) => group.pages.length > 0),
-    windMapPages: dedupeSortedPositive(result.windMapPages, totalPages),
-    flightDetailPages: dedupeSortedPositive(
-      result.flightDetailPages,
-      totalPages,
-    ),
+    notamGroups,
+    windMapPages,
+    routeWeatherTablePages,
+    flightDetailPages,
   };
 }
 
 /**
  * PDF splitter agent. Receives the uploaded original PDF's file_id (and its
  * raw bytes, used only to report the page count to the model) and asks
- * claude-sonnet-4-6 — with adaptive thinking enabled and no constrained
- * thinking budget, because boundary detection benefits from reasoning — to
- * classify every page into NOTAM groups, wind-map pages, or flight-detail
- * pages.
+ * claude-haiku to classify every page into NOTAM groups, wind-map pages,
+ * route/weather table pages, or flight-detail pages.
  *
  * Returns the validated SplitterResult. The orchestrator is responsible for
  * physically splitting the PDF (via splitPdfBySplitterResult) and uploading
@@ -129,6 +151,8 @@ export async function runPdfSplitterAgent(args: {
       throw new Error("Splitter model returned no text output.");
     }
 
+    console.log("Splitter agent responded: ", outputText)
+
     const parsed = splitterResultSchema.safeParse(JSON.parse(outputText));
     if (!parsed.success) {
       throw new Error(
@@ -156,18 +180,18 @@ async function buildPdfFromOneBasedPages(
 }
 
 /**
- * Physically splits the source PDF into one buffer per NOTAM group plus a
- * single flight-details buffer, using explicit 1-indexed page arrays from
+ * Physically splits the source PDF using explicit 1-indexed page arrays from
  * the splitter plan (converted to 0-indexed before being handed to pdf-lib).
  *
- * Wind-map pages are already excluded by omission from flightDetailPages, so
- * no additional filtering is required here.
+ * Wind-map and route/weather-table pages are excluded from flightDetailsPdf by
+ * omission from flightDetailPages in the clamped splitter result.
  */
 export async function splitPdfBySplitterResult(
   originalPdfBytes: Uint8Array,
   result: SplitterResult,
 ): Promise<{
   flightDetailsPdf: Uint8Array | null;
+  routeWeatherTablePdf: Uint8Array | null;
   notamBatchPdfs: Uint8Array[];
 }> {
   const source = await PDFDocument.load(originalPdfBytes);
@@ -177,11 +201,16 @@ export async function splitPdfBySplitterResult(
     result.flightDetailPages,
   );
 
+  const routeWeatherTablePdf = await buildPdfFromOneBasedPages(
+    source,
+    result.routeWeatherTablePages,
+  );
+
   const notamBatchPdfs: Uint8Array[] = [];
   for (const group of result.notamGroups) {
     const buffer = await buildPdfFromOneBasedPages(source, group.pages);
     if (buffer) notamBatchPdfs.push(buffer);
   }
 
-  return { flightDetailsPdf, notamBatchPdfs };
+  return { flightDetailsPdf, routeWeatherTablePdf, notamBatchPdfs };
 }

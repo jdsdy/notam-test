@@ -17,7 +17,6 @@ describe("runFlightDataExtractionAgent", () => {
             time_enroute: 300,
             departure_rwy: "04L",
             arrival_rwy: "25R",
-            route: "KJFK DCT KLAX",
             aircraft_weight: 18000,
             flight_metadata: { cruise_altitude: "FL350" },
             unidentified_fields: [],

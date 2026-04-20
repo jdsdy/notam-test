@@ -182,9 +182,12 @@ export async function runNotamExtractionAgent(args: {
   const { anthropic, notamText } = args;
 
   try {
+
+    console.log("NOTAM extraction agent has started");
+
     const stream = anthropic.beta.messages.stream({
       model: NOTAM_MODEL,
-      max_tokens: 40000,
+      max_tokens: 6000,
       system: SYSTEM_PROMPT,
       thinking: { type: "disabled" },
       output_config: {
@@ -205,7 +208,7 @@ export async function runNotamExtractionAgent(args: {
 
     const response = await stream.finalMessage();
 
-    console.log("NOTAM agent responded: ", JSON.stringify(response.content, null, 2));
+    console.log("NOTAM extraction agent has finished");
 
     const outputText = response.content
       .filter((block) => block.type === "text")

@@ -126,14 +126,68 @@ export type FlightDataExtractionPartial = z.infer<
   typeof flightDataExtractionPartialSchema
 >;
 
+/** Flight-data fields without \`route\` (route comes from the route/weather table agent). */
+export type FlightDataCorePartial = Omit<FlightDataExtractionPartial, "route">;
+
+export const FLIGHT_DATA_CORE_FALLBACK: FlightDataCorePartial = {
+  departure_icao: null,
+  arrival_icao: null,
+  departure_time: null,
+  arrival_time: null,
+  time_enroute: null,
+  departure_rwy: null,
+  arrival_rwy: null,
+  aircraft_weight: null,
+  flight_plan_json: { primary: [], alternate: [] },
+  flight_metadata: null,
+  unidentified_fields: [
+    "departure_icao",
+    "arrival_icao",
+    "departure_time",
+    "arrival_time",
+    "time_enroute",
+    "departure_rwy",
+    "arrival_rwy",
+    "route",
+    "aircraft_weight",
+    "flight_plan_json",
+  ],
+};
+
+export const FLIGHT_DATA_FALLBACK_PARTIAL: FlightDataExtractionPartial = {
+  ...FLIGHT_DATA_CORE_FALLBACK,
+  route: null,
+};
+
+/**
+ * Output of the dedicated route / weather-breakdown-table extractor (left column
+ * waypoints only). Merged in code with the core flight-data partial.
+ */
+export const flightRouteWeatherExtractionPartialSchema = z.object({
+  route: z.string().nullable(),
+  unidentified_fields: z.array(z.string()).default([]),
+});
+
+export type FlightRouteWeatherExtractionPartial = z.infer<
+  typeof flightRouteWeatherExtractionPartialSchema
+>;
+
+/** Use when the splitter did not emit a route/weather table PDF slice. */
+export const ROUTE_PARTIAL_WHEN_NO_TABLE_PDF: FlightRouteWeatherExtractionPartial =
+  {
+    route: null,
+    unidentified_fields: ["route"],
+  };
+
 /**
  * Schema used by the PDF splitter agent to describe how the source flight plan
  * PDF should be broken up before extraction. All page numbers are 1-indexed.
  *
  * The splitter groups NOTAM pages so that a single NOTAM is never bisected
- * across two groups. Wind/weather-chart pages are listed separately and
- * omitted from flightDetailPages, while everything else is treated as flight
- * detail content.
+ * across two groups. Wind/weather-chart pages are listed separately.
+ * Route–weather breakdown table pages (compact table: waypoints left, wind
+ * columns right, under the main route table) are listed separately and omitted
+ * from flightDetailPages. Remaining pages are flight detail content.
  */
 export const notamGroupSchema = z.object({
   pages: z.array(z.number().int()),
@@ -147,6 +201,8 @@ export type NotamGroup = z.infer<typeof notamGroupSchema>;
 export const splitterResultSchema = z.object({
   notamGroups: z.array(notamGroupSchema),
   windMapPages: z.array(z.number().int()),
+  /** Pages containing the compact waypoint + wind breakdown table (left column = route). */
+  routeWeatherTablePages: z.array(z.number().int()),
   flightDetailPages: z.array(z.number().int()),
 });
 

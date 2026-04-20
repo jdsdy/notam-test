@@ -780,8 +780,8 @@ export default function FlightWorkspace({
                     {phase === "analysed"
                       ? "Analysis complete. Expand categories below to review each NOTAM."
                       : phase === "analysing"
-                        ? "Claude is categorising and summarising."
-                        : "Ready to send to Claude for categorisation."}
+                        ? "NOTAMS are being categorised and analysed."
+                        : "Ready for categorisation and analysis."}
                   </p>
                 </div>
                 <div className="flex flex-col items-end gap-2 text-right">

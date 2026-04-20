@@ -3,7 +3,7 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 
 import {
   flightDataExtractionPartialSchema,
-  type FlightDataExtractionPartial,
+  type FlightDataCorePartial,
 } from "@/lib/flight-plan/schemas";
 
 const FILES_API_BETA = "files-api-2025-04-14";
@@ -11,10 +11,13 @@ const FLIGHT_DATA_MODEL = "claude-sonnet-4-6";
 
 const flightDataAgentSchema = flightDataExtractionPartialSchema.omit({
   flight_plan_json: true,
+  route: true,
 });
 
 const SYSTEM_PROMPT = `
-You are a flight-data extraction agent. The PDF you receive contains only the flight-data section of a flight plan document (typically exported from ForeFlight). This includes departure/arrival info, aircraft information and weight, the primary and alternate routes, weather maps, performance tables, and any other operational information about the flight itself. The NOTAM section has been removed — do not look for NOTAMs.
+You are a flight-data extraction agent. The PDF you receive contains only part of the flight-data section of a flight plan document (typically exported from ForeFlight). It may include departure/arrival info, aircraft information and weight, waypoint/route tables (except the dedicated route/weather breakdown table, which is extracted separately), weather maps, performance tables, and other operational information. The NOTAM section has been removed — do not look for NOTAMs.
+
+**Do not extract the route string** — the compact route/weather breakdown table (waypoints in the left column) is provided to a separate agent. Ignore that table if it appears here.
 
 Return a JSON object that matches the provided response schema exactly. The top-level shape is:
 {
@@ -22,15 +25,15 @@ Return a JSON object that matches the provided response schema exactly. The top-
   "departure_time", "arrival_time",
   "time_enroute",
   "departure_rwy", "arrival_rwy",
-  "route",
   "aircraft_weight",
   "flight_metadata": { ... },
   "unidentified_fields": [...]
 }
 
 Top-level flight field rules:
-- For top-level flight fields (departure_icao, arrival_icao, departure_time, arrival_time, time_enroute, departure_rwy, arrival_rwy, route, aircraft_weight), return null directly when a value cannot be extracted.
+- For top-level flight fields (departure_icao, arrival_icao, departure_time, arrival_time, time_enroute, departure_rwy, arrival_rwy, aircraft_weight), return null directly when a value cannot be extracted.
 - If a top-level flight field cannot be extracted, also add its field name to the unidentified_fields array.
+- Do not add "route" to unidentified_fields here — route is handled elsewhere.
 
 flight_metadata rules:
 - Put any additional useful flight-planning values that are not covered by the top-level fields into flight_metadata as a free-form JSON object. Examples: "cruise_altitude": "FL320", "cruise_speed": "mach 0.89", "wind_avg": "63kt head (288/067)", "total_fuel_required": 19379.
@@ -49,7 +52,6 @@ Example extraction shape:
   "time_enroute": 247,
   "departure_rwy": "04L",
   "arrival_rwy": "25R",
-  "route": "KJFK TESAT KADOM",
   "aircraft_weight": 18000,
   "flight_metadata": {
     "cruise_altitude": "FL320",
@@ -70,7 +72,7 @@ Output only JSON data according to the schema provided. No preamble, postamble, 
 export async function runFlightDataExtractionAgent(args: {
   anthropic: Anthropic;
   flightDataFileId: string;
-}): Promise<FlightDataExtractionPartial> {
+}): Promise<FlightDataCorePartial> {
   const { anthropic, flightDataFileId } = args;
 
   try {
