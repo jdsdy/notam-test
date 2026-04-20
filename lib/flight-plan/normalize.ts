@@ -52,7 +52,7 @@ function normalizeWaypoint(
   };
 }
 
-function normalizeFlightPlanJson(
+export function normalizeFlightPlanJson(
   payload: z.infer<typeof flightPlanJsonSchema>,
 ): Record<string, unknown> {
   return {

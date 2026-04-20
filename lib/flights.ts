@@ -42,6 +42,130 @@ export type FlightDetail = FlightRow & {
   pic_email: string;
 };
 
+export type UserRecentFlight = FlightSummary & {
+  organisation_id: string;
+  organisation_name: string;
+};
+
+/** Flights for organisations the user is a member of, newest first. */
+export async function listRecentFlightsForUser(
+  userId: string,
+  limit: number = 6,
+): Promise<UserRecentFlight[]> {
+  const supabase = await createSupabaseServerClient();
+
+  const { data: memberships } = await supabase
+    .from("organisation_members")
+    .select("organisation_id")
+    .eq("user_id", userId);
+
+  const orgIds = [
+    ...new Set((memberships ?? []).map((m) => m.organisation_id as string)),
+  ];
+  if (!orgIds.length) return [];
+
+  const { data: flights } = await supabase
+    .from("flights")
+    .select(
+      "id, created_at, status, departure_icao, arrival_icao, aircraft_id, pic_id, organisation_id",
+    )
+    .in("organisation_id", orgIds)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (!flights?.length) return [];
+
+  const aircraftIds = [...new Set(flights.map((f) => f.aircraft_id as string))];
+  const picIds = [...new Set(flights.map((f) => f.pic_id as string))];
+
+  const [{ data: aircraftRows }, { data: profiles }, { data: orgs }] =
+    await Promise.all([
+      supabase
+        .from("aircraft")
+        .select("id, tail_number, type")
+        .in("id", aircraftIds),
+      supabase.from("profiles").select("id, name, email").in("id", picIds),
+      supabase.from("organisations").select("id, name").in("id", orgIds),
+    ]);
+
+  const aircraftById = new Map(
+    (aircraftRows ?? []).map((a) => [
+      a.id as string,
+      {
+        tail_number: a.tail_number as string,
+        type: a.type as string,
+      },
+    ]),
+  );
+  const profileById = new Map(
+    (profiles ?? []).map((p) => [
+      p.id as string,
+      {
+        name: ((p.name as string) ?? "").trim() || "—",
+      },
+    ]),
+  );
+  const orgById = new Map(
+    (orgs ?? []).map((o) => [o.id as string, (o.name as string) ?? "—"]),
+  );
+
+  return flights.map((f) => {
+    const ac = aircraftById.get(f.aircraft_id as string);
+    const pic = profileById.get(f.pic_id as string);
+    return {
+      id: f.id as string,
+      created_at: f.created_at as string,
+      status: (f.status as string | null) ?? null,
+      departure_icao: (f.departure_icao as string | null) ?? null,
+      arrival_icao: (f.arrival_icao as string | null) ?? null,
+      tail_number: ac?.tail_number ?? "—",
+      aircraft_type: ac?.type ?? "—",
+      pic_name: pic?.name ?? "—",
+      organisation_id: f.organisation_id as string,
+      organisation_name:
+        orgById.get(f.organisation_id as string) ?? "Organisation",
+    };
+  });
+}
+
+export async function countFlightsForAircraft(
+  aircraftId: string,
+): Promise<number> {
+  const supabase = await createSupabaseServerClient();
+  const { count } = await supabase
+    .from("flights")
+    .select("id", { count: "exact", head: true })
+    .eq("aircraft_id", aircraftId);
+  return count ?? 0;
+}
+
+export async function getAircraftById(
+  aircraftId: string,
+  organisationId: string,
+) {
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("aircraft")
+    .select(
+      "id, organisation_id, manufacturer, type, tail_number, seats, wingspan, created_at",
+    )
+    .eq("id", aircraftId)
+    .eq("organisation_id", organisationId)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  return data as {
+    id: string;
+    organisation_id: string;
+    manufacturer: string;
+    type: string;
+    tail_number: string;
+    seats: number;
+    wingspan: number | null;
+    created_at: string;
+  };
+}
+
 export async function listFlightsForOrganisation(
   organisationId: string,
 ): Promise<FlightSummary[]> {

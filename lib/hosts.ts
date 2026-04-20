@@ -28,3 +28,23 @@ export function buildAppEntryUrlFromHeaders(headerList: Headers): string {
   return `${proto}://${buildAppRequestHostFromMarketingHost(host)}`;
 }
 
+/** App → marketing entry host for the current deployment. Strips the `app.` prefix. */
+export function buildMarketingRequestHostFromAppHost(host: string): string {
+  const { hostname, port } = splitHostAndPort(host.toLowerCase());
+  const marketingHostname =
+    hostname === "app.localhost"
+      ? "localhost"
+      : hostname.startsWith("app.")
+        ? hostname.slice("app.".length)
+        : hostname;
+  return buildHost(marketingHostname, port);
+}
+
+export function buildMarketingEntryUrlFromHeaders(headerList: Headers): string {
+  const host = headerList.get("host") ?? "app.localhost:3000";
+  const proto =
+    headerList.get("x-forwarded-proto") ??
+    (host.toLowerCase().includes("localhost") ? "http" : "https");
+  return `${proto}://${buildMarketingRequestHostFromAppHost(host)}`;
+}
+

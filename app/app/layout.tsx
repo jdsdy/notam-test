@@ -1,7 +1,9 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
-import AppNavBar from "@/components/app/app-nav-bar";
+import AppSidebar from "@/components/app/app-sidebar";
+import { listMyOrganisations } from "@/lib/organisations";
+import { ensureProfile, getProfileForUser } from "@/lib/profile";
 import { getCurrentUser } from "@/lib/supabase/server";
 
 const ORIGINAL_PATH_HEADER = "x-original-pathname";
@@ -36,10 +38,34 @@ export default async function AppShellLayout({
     redirect("/auth");
   }
 
+  await ensureProfile(user);
+
+  const [profile, organisations] = await Promise.all([
+    getProfileForUser(user.id),
+    listMyOrganisations(user.id),
+  ]);
+
+  const displayName =
+    profile?.full_name?.trim() ||
+    (typeof user.user_metadata?.name === "string"
+      ? user.user_metadata.name
+      : "") ||
+    "";
+
   return (
-    <div className="min-h-screen bg-background">
-      <AppNavBar email={user.email ?? user.id} />
-      {children}
+    <div className="relative min-h-screen">
+      <AppSidebar
+        user={{
+          name: displayName,
+          email: user.email ?? user.id,
+        }}
+        organisations={organisations}
+      />
+      <div className="md:pl-[16.5rem] transition-[padding] duration-300 ease-[cubic-bezier(0.2,0.7,0.2,1)] [html[data-sidebar-collapsed='1']_&]:md:pl-[4.5rem]">
+        <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 md:px-10 md:py-12">
+          {children}
+        </div>
+      </div>
     </div>
   );
 }

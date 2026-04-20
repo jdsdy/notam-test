@@ -3,15 +3,8 @@ import { notFound } from "next/navigation";
 
 import OrgAircraftFleet from "@/components/app/org-aircraft-fleet";
 import OrgFlightsCard from "@/components/app/org-flights-card";
-import OrgMembersTables from "@/components/app/org-members-tables";
+import OrgMembersList from "@/components/app/org-members-list";
 import { buttonVariants } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { listAircraftForOrganisation } from "@/lib/aircraft";
 import { listFlightsForOrganisation } from "@/lib/flights";
 import {
@@ -29,15 +22,11 @@ type PageProps = {
 
 export default async function OrganisationManagePage({ params }: PageProps) {
   const user = await getCurrentUser();
-  if (!user) {
-    return null;
-  }
+  if (!user) return null;
 
   const { organisationId } = await params;
   const hasAccess = await assertOrgAccess(user.id, organisationId);
-  if (!hasAccess) {
-    notFound();
-  }
+  if (!hasAccess) notFound();
 
   const [name, members, aircraft, flights, canManageFleet] = await Promise.all([
     getOrganisationName(organisationId),
@@ -47,54 +36,74 @@ export default async function OrganisationManagePage({ params }: PageProps) {
     isOrganisationAdmin(user.id, organisationId),
   ]);
 
+  const admins = members.filter((m) => m.is_admin);
+
   return (
-    <main className="mx-auto max-w-5xl space-y-10 px-4 py-10 sm:px-6">
-      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="space-y-1">
-          <p className="text-xs text-muted-foreground">
-            <Link href="/" className="underline-offset-4 hover:underline">
+    <main className="space-y-12">
+      <header className="rise-in rise-in-1 flex flex-col gap-6 border-b border-border/50 pb-8 sm:flex-row sm:items-end sm:justify-between">
+        <div className="space-y-3">
+          <p className="font-mono text-[0.7rem] uppercase tracking-[0.22em] text-muted-foreground">
+            <Link href="/" className="hover:text-foreground">
               Dashboard
             </Link>
-            <span className="px-1">/</span>
+            <span className="mx-1.5">/</span>
             <span>Organisation</span>
           </p>
-          <h1 className="font-heading text-2xl font-medium tracking-tight">
+          <h1 className="font-heading text-4xl font-normal tracking-tight text-foreground md:text-5xl">
             {name ?? "Organisation"}
           </h1>
-          <p className="text-sm text-muted-foreground">
-            Members are grouped by administrator access.
-          </p>
+          <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-white/70 px-2.5 py-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-[oklch(0.55_0.12_285)]" />
+              {members.length} member{members.length === 1 ? "" : "s"}
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-white/70 px-2.5 py-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-[oklch(0.7_0.13_40)]" />
+              {aircraft.length} aircraft
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-white/70 px-2.5 py-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-[oklch(0.6_0.12_150)]" />
+              {flights.length} flight{flights.length === 1 ? "" : "s"}
+            </span>
+            {canManageFleet ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-[oklch(0.85_0.1_285)] bg-[oklch(0.97_0.04_285)] px-2.5 py-1 text-[oklch(0.35_0.14_285)]">
+                Admin
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-white/70 px-2.5 py-1">
+                Member
+              </span>
+            )}
+          </div>
         </div>
-        <Link href="/" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
+        <Link
+          href="/"
+          className={cn(
+            buttonVariants({ variant: "outline", size: "sm" }),
+            "bg-white/60",
+          )}
+        >
           Back to dashboard
         </Link>
-      </div>
+      </header>
 
-      <OrgAircraftFleet
-        organisationId={organisationId}
-        aircraft={aircraft}
-        canManage={canManageFleet}
-      />
+      <section className="rise-in rise-in-2 grid gap-6 lg:grid-cols-2">
+        <OrgAircraftFleet
+          organisationId={organisationId}
+          aircraft={aircraft}
+          canManage={canManageFleet}
+        />
+        <OrgMembersList members={members} adminCount={admins.length} />
+      </section>
 
-      <OrgFlightsCard
-        organisationId={organisationId}
-        flights={flights}
-        aircraft={aircraft}
-        members={members}
-      />
-
-      <Card className="shadow-sm">
-        <CardHeader>
-          <CardTitle>Members</CardTitle>
-          <CardDescription>
-            Names and emails come from user profiles. Administrators are listed
-            first.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <OrgMembersTables members={members} />
-        </CardContent>
-      </Card>
+      <section className="rise-in rise-in-3">
+        <OrgFlightsCard
+          organisationId={organisationId}
+          flights={flights}
+          aircraft={aircraft}
+          members={members}
+        />
+      </section>
     </main>
   );
 }
