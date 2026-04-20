@@ -408,6 +408,7 @@ export default function FlightWorkspace({
       <Separator />
 
       <NotamAnalysisPanel
+        organisationId={organisationId}
         flightId={flight.id}
         savedNotamCount={countNotamsInFlightPlanJson(flight.flight_plan_json)}
         notamWorkspace={notamWorkspace}

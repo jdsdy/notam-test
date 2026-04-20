@@ -9,6 +9,8 @@ export type AircraftRow = {
   type: string;
   tail_number: string;
   seats: number;
+  /** Meters; present when `aircraft.wingspan` is set in the database. */
+  wingspan?: number | null;
   created_at: string;
 };
 
@@ -18,7 +20,9 @@ export async function listAircraftForOrganisation(
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
     .from("aircraft")
-    .select("id, organisation_id, manufacturer, type, tail_number, seats, created_at")
+    .select(
+      "id, organisation_id, manufacturer, type, tail_number, seats, wingspan, created_at",
+    )
     .eq("organisation_id", organisationId)
     .order("tail_number", { ascending: true });
 

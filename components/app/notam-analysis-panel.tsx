@@ -34,6 +34,7 @@ const CATEGORY_HEADLINE: Record<1 | 2 | 3, string> = {
 };
 
 type Props = {
+  organisationId: string;
   flightId: string;
   savedNotamCount: number;
   notamWorkspace: NotamAnalysisWorkspaceState;
@@ -52,6 +53,7 @@ function DetailField({ label, value }: { label: string; value: string | null | u
 }
 
 export default function NotamAnalysisPanel({
+  organisationId,
   flightId,
   savedNotamCount,
   notamWorkspace,
@@ -83,6 +85,8 @@ export default function NotamAnalysisPanel({
       const res = await fetch(`/api/flights/${flightId}/analyse-notams`, {
         method: "POST",
         credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ organisationId }),
       });
       const body = (await res.json()) as
         | { ok: true; analysisId: string }
@@ -110,8 +114,8 @@ export default function NotamAnalysisPanel({
             <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">
               notam_analyses
             </code>{" "}
-            until you run analysis. The second API call simulates an AI model, then saves
-            categorised results on the same row.
+            until you run analysis. The second API calls Claude to categorise and summarise,
+            then saves results on the same row.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -177,7 +181,7 @@ export default function NotamAnalysisPanel({
           {analyseBusy ? (
             <div className="space-y-4 rounded-lg border border-dashed border-border bg-card/50 p-4">
               <p className="notam-ai-shimmer text-sm font-medium">
-                AI model is categorising NOTAMs and writing plain-language summaries…
+                Claude is categorising NOTAMs and writing plain-language summaries…
               </p>
               <div className="space-y-2">
                 <Skeleton className="h-3 w-full max-w-md" />
@@ -185,7 +189,7 @@ export default function NotamAnalysisPanel({
                 <Skeleton className="h-3 w-4/5 max-w-sm" />
               </div>
               <p className="text-xs text-muted-foreground">
-                This is a simulated delay; results are written to the database when complete.
+                Results are written to the database when the model run completes.
               </p>
             </div>
           ) : null}

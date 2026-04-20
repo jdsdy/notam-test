@@ -1,25 +1,21 @@
 import "server-only";
 
+import Anthropic from "@anthropic-ai/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { FlightPlanParsedFields } from "@/lib/flight-plan-parse";
 import { isFlightStatus } from "@/lib/flight-status";
+import { buildNotamAnalysisAgentContext } from "@/lib/notam-analysis/flight-json-for-notam-analysis";
+import { buildAnalysedNotamsFromLlmCategories } from "@/lib/notam-analysis/merge-llm-notam-categories";
+import { runNotamCategorisationOnStructuredNotamChunks } from "@/lib/notam-analysis/run-notam-categorisation-chunks";
 import {
-  buildSimulatedAnalysedNotams,
   parseRawNotamsFromFlightPlanJson,
   type AnalysedNotamsPayload,
   type RawNotamsPayload,
 } from "@/lib/notams";
 
-const ANALYSIS_DELAY_MS = 2600;
 const RAW_NOTAMS_EXTRACTION_STATUS_KEY = "_status";
 const RAW_NOTAMS_EXTRACTION_STATUS_EXTRACTING = "extracting";
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
 
 export type ApplyParsedFlightPlanResult =
   | { ok: true }
@@ -206,11 +202,59 @@ export type RunNotamAnalysisServiceResult =
   | { ok: true; analysisId: string; analysed: AnalysedNotamsPayload }
   | { ok: false; error: string };
 
-/** Loads pending raw NOTAMs, runs simulated AI, persists analysed JSON on the same row. */
+export type RunNotamAnalysisForFlightDeps = {
+  /** Injected in tests; defaults to a new client using `ANTHROPIC_API_KEY`. */
+  anthropic?: Anthropic;
+};
+
+/**
+ * Loads the flight (scoped to organisation), pending `raw_notams`, runs Claude
+ * categorisation on structured NOTAMs only, merges summaries, persists `analysed_notams`.
+ */
 export async function runNotamAnalysisForFlight(
   supabase: SupabaseClient,
   flightId: string,
+  organisationId: string,
+  deps?: RunNotamAnalysisForFlightDeps,
 ): Promise<RunNotamAnalysisServiceResult> {
+  const { data: flight, error: flightErr } = await supabase
+    .from("flights")
+    .select(
+      "aircraft_id, departure_icao, arrival_icao, departure_time, arrival_time, time_enroute, departure_rwy, arrival_rwy, route, aircraft_weight, flight_metadata",
+    )
+    .eq("id", flightId)
+    .eq("organisation_id", organisationId)
+    .maybeSingle();
+
+  if (flightErr || !flight) {
+    return {
+      ok: false,
+      error: "Flight not found for this organisation.",
+    };
+  }
+
+  const aircraftId = flight.aircraft_id as string | null | undefined;
+  const { data: aircraftRow } =
+    aircraftId != null && aircraftId !== ""
+      ? await supabase
+          .from("aircraft")
+          .select("manufacturer, type, wingspan")
+          .eq("id", aircraftId)
+          .eq("organisation_id", organisationId)
+          .maybeSingle()
+      : { data: null };
+
+  const aircraft =
+    aircraftRow &&
+    typeof aircraftRow === "object" &&
+    !Array.isArray(aircraftRow)
+      ? {
+          manufacturer: (aircraftRow.manufacturer as string | null) ?? null,
+          type: (aircraftRow.type as string | null) ?? null,
+          wingspan: aircraftRow.wingspan,
+        }
+      : null;
+
   const { data: pending, error: loadErr } = await supabase
     .from("notam_analyses")
     .select("id, raw_notams")
@@ -228,13 +272,25 @@ export async function runNotamAnalysisForFlight(
     };
   }
 
-  const rawPayload = parseRawNotamsFromFlightPlanJson(
+  const rawSource =
     pending.raw_notams &&
-      typeof pending.raw_notams === "object" &&
-      !Array.isArray(pending.raw_notams)
+    typeof pending.raw_notams === "object" &&
+    !Array.isArray(pending.raw_notams)
       ? (pending.raw_notams as Record<string, unknown>)
-      : null,
-  );
+      : null;
+
+  if (
+    rawSource?.[RAW_NOTAMS_EXTRACTION_STATUS_KEY] ===
+    RAW_NOTAMS_EXTRACTION_STATUS_EXTRACTING
+  ) {
+    return {
+      ok: false,
+      error:
+        "NOTAM extraction is still in progress. Wait for extraction to finish before analysing.",
+    };
+  }
+
+  const rawPayload = parseRawNotamsFromFlightPlanJson(rawSource);
   if (!rawPayload?.notams.length) {
     return {
       ok: false,
@@ -242,8 +298,61 @@ export async function runNotamAnalysisForFlight(
     };
   }
 
-  await sleep(ANALYSIS_DELAY_MS);
-  const analysed = buildSimulatedAnalysedNotams(rawPayload);
+  let anthropic = deps?.anthropic;
+  if (!anthropic) {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      return {
+        ok: false,
+        error: "ANTHROPIC_API_KEY is not configured.",
+      };
+    }
+    anthropic = new Anthropic({ apiKey });
+  }
+
+  const agentContext = buildNotamAnalysisAgentContext({
+    flight: {
+      departure_icao: (flight.departure_icao as string | null) ?? null,
+      arrival_icao: (flight.arrival_icao as string | null) ?? null,
+      departure_time: (flight.departure_time as string | null) ?? null,
+      arrival_time: (flight.arrival_time as string | null) ?? null,
+      time_enroute: (flight.time_enroute as number | null) ?? null,
+      departure_rwy: (flight.departure_rwy as string | null) ?? null,
+      arrival_rwy: (flight.arrival_rwy as string | null) ?? null,
+      route: (flight.route as string | null) ?? null,
+      aircraft_weight: (flight.aircraft_weight as number | null) ?? null,
+      flight_metadata:
+        flight.flight_metadata &&
+        typeof flight.flight_metadata === "object" &&
+        !Array.isArray(flight.flight_metadata)
+          ? (flight.flight_metadata as Record<string, unknown>)
+          : null,
+    },
+    aircraft,
+  });
+
+  let llmOut;
+  try {
+    llmOut = await runNotamCategorisationOnStructuredNotamChunks({
+      anthropic,
+      agentContext,
+      notams: rawPayload.notams,
+    });
+  } catch (error) {
+    if (error instanceof Anthropic.APIError) {
+      return {
+        ok: false,
+        error: `Anthropic request failed: ${error.message}`,
+      };
+    }
+    const reason = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      error: `NOTAM analysis failed: ${reason}`,
+    };
+  }
+
+  const analysed = buildAnalysedNotamsFromLlmCategories(rawPayload, llmOut);
 
   const { error: updateErr } = await supabase
     .from("notam_analyses")

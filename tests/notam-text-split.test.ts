@@ -12,8 +12,8 @@ function notamStub(n: number): string {
 }
 
 describe("splitNotamText", () => {
-  it("uses DEFAULT_NOTAM_TEXT_CHUNK_SIZE of 20", () => {
-    expect(DEFAULT_NOTAM_TEXT_CHUNK_SIZE).toBe(20);
+  it("uses DEFAULT_NOTAM_TEXT_CHUNK_SIZE of 10", () => {
+    expect(DEFAULT_NOTAM_TEXT_CHUNK_SIZE).toBe(10);
   });
 
   it("returns a single chunk when no ICAO NOTAM id lines are present", () => {

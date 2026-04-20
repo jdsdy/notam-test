@@ -6,7 +6,7 @@ import { assertUserCanAccessFlight } from "@/lib/flights";
 import { createSupabaseServerClient, getCurrentUser } from "@/lib/supabase/server";
 
 export async function POST(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ flightId: string }> },
 ) {
   const user = await getCurrentUser();
@@ -14,6 +14,31 @@ export async function POST(
     return NextResponse.json(
       { ok: false as const, error: "Unauthorized" },
       { status: 401 },
+    );
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json(
+      { ok: false as const, error: "Request body must be JSON." },
+      { status: 400 },
+    );
+  }
+
+  const organisationId =
+    body &&
+    typeof body === "object" &&
+    "organisationId" in body &&
+    typeof (body as { organisationId: unknown }).organisationId === "string"
+      ? (body as { organisationId: string }).organisationId.trim()
+      : "";
+
+  if (!organisationId) {
+    return NextResponse.json(
+      { ok: false as const, error: "organisationId is required in the JSON body." },
+      { status: 400 },
     );
   }
 
@@ -26,18 +51,28 @@ export async function POST(
     );
   }
 
-  const supabase = await createSupabaseServerClient();
-  const result = await runNotamAnalysisForFlight(supabase, flightId);
-
-  if (!result.ok) {
+  if (access.organisationId !== organisationId) {
     return NextResponse.json(
-      { ok: false as const, error: result.error },
-      { status: 400 },
+      { ok: false as const, error: "Forbidden" },
+      { status: 403 },
     );
   }
 
-  revalidatePath(`/organisations/${access.organisationId}`);
-  revalidatePath(`/organisations/${access.organisationId}/flights/${flightId}`);
+  const supabase = await createSupabaseServerClient();
+  const result = await runNotamAnalysisForFlight(supabase, flightId, organisationId);
+
+  if (!result.ok) {
+    const upstream =
+      result.error.startsWith("Anthropic request failed") ||
+      result.error.startsWith("NOTAM analysis failed");
+    return NextResponse.json(
+      { ok: false as const, error: result.error },
+      { status: upstream ? 502 : 400 },
+    );
+  }
+
+  revalidatePath(`/organisations/${organisationId}`);
+  revalidatePath(`/organisations/${organisationId}/flights/${flightId}`);
 
   return NextResponse.json({
     ok: true as const,

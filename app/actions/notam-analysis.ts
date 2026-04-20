@@ -26,7 +26,11 @@ export async function runNotamAnalysisAction(input: {
   }
 
   const supabase = await createSupabaseServerClient();
-  const result = await runNotamAnalysisForFlight(supabase, input.flightId);
+  const result = await runNotamAnalysisForFlight(
+    supabase,
+    input.flightId,
+    input.organisationId,
+  );
 
   if (!result.ok) {
     return { ok: false, error: result.error };

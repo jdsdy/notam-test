@@ -23,7 +23,11 @@ export type AnalysedNotam = RawNotam & {
   summary: string;
 };
 
-export type AnalysedNotamsPayload = { notams: AnalysedNotam[] };
+export type AnalysedNotamsPayload = {
+  notams: AnalysedNotam[];
+  /** Carried forward from raw extraction; not produced by the categorisation model. */
+  unformatted_notams: string[];
+};
 
 /** Latest stored analysis row, safe to pass from RSC into client components. */
 export type LatestNotamAnalysisForClient = {
@@ -208,7 +212,7 @@ const CATEGORY_SUMMARIES: Record<
     `Advisory / low impact: ${(n.title ?? "unknown notam").toLowerCase()} — note for situational awareness; unlikely to change your filed plan.`,
 };
 
-/** Deterministic “AI” output for development (replace with real model integration). */
+/** Deterministic “AI” output for tests and local fixtures. */
 export function buildSimulatedAnalysedNotams(raw: RawNotamsPayload): AnalysedNotamsPayload {
   const notams: AnalysedNotam[] = raw.notams.map((n, i) => {
     const category = ((i % 3) + 1) as 1 | 2 | 3;
@@ -218,7 +222,7 @@ export function buildSimulatedAnalysedNotams(raw: RawNotamsPayload): AnalysedNot
       summary: CATEGORY_SUMMARIES[category](n),
     };
   });
-  return { notams };
+  return { notams, unformatted_notams: [...raw.unformatted_notams] };
 }
 
 export function parseAnalysedNotamsPayload(
@@ -256,7 +260,12 @@ export function parseAnalysedNotamsPayload(
     if (!isRawNotam(base)) continue;
     notams.push({ ...base, category, summary });
   }
-  return notams.length ? { notams } : null;
+  if (!notams.length) return null;
+  const unf = o.unformatted_notams;
+  const unformatted_notams = Array.isArray(unf)
+    ? unf.filter((v): v is string => typeof v === "string")
+    : [];
+  return { notams, unformatted_notams };
 }
 
 export function notamCategoryStyles(category: 1 | 2 | 3): {
