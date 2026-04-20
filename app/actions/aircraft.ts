@@ -14,6 +14,7 @@ export async function createAircraftAction(input: {
   aircraftType: string;
   tailNumber: string;
   seats: number;
+  wingspan: number;
 }): Promise<CreateAircraftResult> {
   const user = await getCurrentUser();
   if (!user) {
@@ -39,6 +40,13 @@ export async function createAircraftAction(input: {
       ? Math.floor(input.seats)
       : 0;
 
+  if (
+    !Number.isFinite(input.wingspan) ||
+    input.wingspan <= 0
+  ) {
+    return { error: "Wingspan must be a positive number (meters)." };
+  }
+
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase.from("aircraft").insert({
     organisation_id: input.organisationId,
@@ -46,6 +54,7 @@ export async function createAircraftAction(input: {
     type: input.aircraftType,
     tail_number: tail,
     seats,
+    wingspan: input.wingspan,
   });
 
   if (error) {

@@ -33,6 +33,7 @@ function initialState() {
   return {
     manufacturer: "" as AircraftManufacturer | "",
     aircraftType: "",
+    wingspan: "",
     tailNumber: "",
     seats: "",
   };
@@ -77,6 +78,17 @@ export default function AddAircraftWizard({
       return;
     }
 
+    const wingspanRaw = state.wingspan.trim();
+    const wingspanParsed = Number.parseFloat(wingspanRaw);
+    if (
+      wingspanRaw === "" ||
+      !Number.isFinite(wingspanParsed) ||
+      wingspanParsed <= 0
+    ) {
+      setError("Wingspan is required and must be a positive number (meters).");
+      return;
+    }
+
     const tail = state.tailNumber.trim();
     if (!tail) {
       setError("Tail number is required.");
@@ -98,6 +110,7 @@ export default function AddAircraftWizard({
         aircraftType: state.aircraftType,
         tailNumber: tail,
         seats: seatsRaw === "" ? 0 : seatsParsed,
+        wingspan: wingspanParsed,
       });
       if (res.error) {
         setError(res.error);
@@ -115,8 +128,8 @@ export default function AddAircraftWizard({
         <DialogHeader>
           <DialogTitle>Add aircraft</DialogTitle>
           <DialogDescription>
-            Enter manufacturer, type, tail number, and optional seating. Types
-            update when you pick a manufacturer.
+            Enter manufacturer, type, wingspan, tail number, and optional seating.
+            Types update when you pick a manufacturer.
           </DialogDescription>
         </DialogHeader>
 
@@ -138,6 +151,7 @@ export default function AddAircraftWizard({
                   ...s,
                   manufacturer: m,
                   aircraftType: "",
+                  wingspan: "",
                 }));
               }}
             >
@@ -180,6 +194,29 @@ export default function AddAircraftWizard({
                 ))}
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="fleet-wingspan">Wingspan (m)</Label>
+            <Input
+              id="fleet-wingspan"
+              type="number"
+              min={0}
+              step="any"
+              inputMode="decimal"
+              value={state.wingspan}
+              onChange={(e) =>
+                setState((s) => ({ ...s, wingspan: e.target.value }))
+              }
+              placeholder={
+                state.manufacturer && state.aircraftType
+                  ? "e.g. 35.8"
+                  : "Select manufacturer and type first"
+              }
+              disabled={!state.manufacturer || !state.aircraftType}
+              aria-required
+              autoComplete="off"
+            />
           </div>
 
           <div className="space-y-2">
