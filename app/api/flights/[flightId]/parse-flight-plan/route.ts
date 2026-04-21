@@ -31,6 +31,13 @@ import { enforceParseFlightPlanRateLimit } from "@/lib/api-rate-limit";
 import { extractPdfText } from "@/lib/pdf-parse-server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
+// Force the Node runtime: pdf-parse / pdfjs-dist rely on Node-only APIs and a
+// native canvas polyfill, which are unavailable on the Edge runtime.
+export const runtime = "nodejs";
+// PDF splitting + multiple Anthropic agent calls can comfortably exceed the
+// default 60s limit on Vercel's Hobby/Pro defaults.
+export const maxDuration = 300;
+
 const FILES_API_BETA = "files-api-2025-04-14";
 const FLIGHT_PLAN_UPLOADS_BUCKET = "flight_plan_uploads";
 
