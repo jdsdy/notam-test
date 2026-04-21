@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 
+import { enforceAnalyseNotamsRateLimit } from "@/lib/api-rate-limit";
 import { runNotamAnalysisForFlight } from "@/lib/notam-analysis-service";
 import { assertUserCanAccessFlight } from "@/lib/flights";
 import { createSupabaseServerClient, getCurrentUser } from "@/lib/supabase/server";
@@ -15,6 +16,11 @@ export async function POST(
       { ok: false as const, error: "Unauthorized" },
       { status: 401 },
     );
+  }
+
+  const rateLimit = await enforceAnalyseNotamsRateLimit(user.id);
+  if (!rateLimit.ok) {
+    return rateLimit.response;
   }
 
   let body: unknown;

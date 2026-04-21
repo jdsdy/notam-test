@@ -41,6 +41,10 @@ vi.mock("@/lib/supabase/server", () => ({
   getCurrentUser: mocks.getCurrentUser,
 }));
 
+vi.mock("@/lib/api-rate-limit", () => ({
+  enforceParseFlightPlanRateLimit: vi.fn().mockResolvedValue({ ok: true }),
+}));
+
 vi.mock("@/lib/flights", () => ({
   assertUserCanAccessFlight: mocks.assertUserCanAccessFlight,
   assertAircraftBelongsToOrganisation: mocks.assertAircraftBelongsToOrganisation,

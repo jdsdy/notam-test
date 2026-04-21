@@ -27,6 +27,7 @@ import {
   markPendingNotamExtraction,
   upsertPendingNotamAnalysis,
 } from "@/lib/notam-analysis-service";
+import { enforceParseFlightPlanRateLimit } from "@/lib/api-rate-limit";
 import { extractPdfText } from "@/lib/pdf-parse-server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -155,6 +156,11 @@ export async function POST(
       { ok: false as const, error: "Unauthorized" },
       { status: 401 },
     );
+  }
+
+  const rateLimit = await enforceParseFlightPlanRateLimit(user.id);
+  if (!rateLimit.ok) {
+    return rateLimit.response;
   }
 
   const formData = await request.formData();
