@@ -16,8 +16,7 @@ function isAuthMode(value: string): value is "signin" | "signup" {
   return value === "signin" || value === "signup";
 }
 
-const SIGNUP_DISABLED_MESSAGE =
-  "Account creation is currently not possible as JetOps is in a private invite-only testing phase. If you should have access, please contact your JetOps representative";
+const BETA_KEY_FIELD_NAME = "betaAccessKey";
 
 export default function AuthCard() {
   const [mode, setMode] = React.useState<"signin" | "signup">("signin");
@@ -30,6 +29,20 @@ export default function AuthCard() {
     setInfo(null);
 
     startTransition(async () => {
+      if (mode === "signup") {
+        const providedKey = String(formData.get(BETA_KEY_FIELD_NAME) ?? "").trim();
+        if (!providedKey) {
+          setError("Beta Access Key is required to create an account.");
+          return;
+        }
+
+        const betaAccessKeyExpected = process.env.NEXT_PUBLIC_BETA_ACCESS_KEY ?? "";
+        if (!betaAccessKeyExpected || providedKey !== betaAccessKeyExpected) {
+          setError("Invalid Beta Access Key.");
+          return;
+        }
+      }
+
       const res =
         mode === "signin"
           ? await signInWithPassword(formData)
@@ -91,42 +104,69 @@ export default function AuthCard() {
           </Alert>
         ) : null}
 
-        {mode === "signup" ? (
-          <div className="mt-5 rounded-xl border border-border/60 bg-white/70 p-4 text-sm leading-relaxed text-foreground backdrop-blur">
-            {SIGNUP_DISABLED_MESSAGE}
-          </div>
-        ) : (
-          <form action={onSubmit} className="mt-5 space-y-4">
-            <Field label="Email" id={`${mode}-email`}>
+        <form action={onSubmit} className="mt-5 space-y-4">
+          {mode === "signup" ? (
+            <Field label="Name" id={`${mode}-name`}>
               <Input
-                id={`${mode}-email`}
-                name="email"
-                type="email"
-                autoComplete="email"
+                id={`${mode}-name`}
+                name="name"
+                autoComplete="name"
                 required
-                placeholder="you@company.com"
+                placeholder="Your name"
               />
             </Field>
+          ) : null}
 
-            <Field label="Password" id={`${mode}-password`}>
-              <Input
-                id={`${mode}-password`}
-                name="password"
-                type="password"
-                autoComplete="current-password"
-                required
-              />
-            </Field>
+          <Field label="Email" id={`${mode}-email`}>
+            <Input
+              id={`${mode}-email`}
+              name="email"
+              type="email"
+              autoComplete="email"
+              required
+              placeholder="you@company.com"
+            />
+          </Field>
 
-            <Button
-              type="submit"
-              className="mt-2 h-10 w-full shadow-soft [a]:hover:bg-primary/90"
-              disabled={pending}
+          <Field label="Password" id={`${mode}-password`}>
+            <Input
+              id={`${mode}-password`}
+              name="password"
+              type="password"
+              autoComplete={mode === "signin" ? "current-password" : "new-password"}
+              required
+            />
+          </Field>
+
+          {mode === "signup" ? (
+            <Field
+              label="Beta Access Key"
+              id={`${mode}-beta-access-key`}
+              hint="Required during the private beta."
             >
-              {pending ? "Signing in…" : "Sign in"}
-            </Button>
-          </form>
-        )}
+              <Input
+                id={`${mode}-beta-access-key`}
+                name={BETA_KEY_FIELD_NAME}
+                required
+                placeholder="Enter your beta key"
+              />
+            </Field>
+          ) : null}
+
+          <Button
+            type="submit"
+            className="mt-2 h-10 w-full shadow-soft [a]:hover:bg-primary/90"
+            disabled={pending}
+          >
+            {pending
+              ? mode === "signin"
+                ? "Signing in…"
+                : "Creating account…"
+              : mode === "signin"
+                ? "Sign in"
+                : "Create account"}
+          </Button>
+        </form>
       </div>
     </div>
   );

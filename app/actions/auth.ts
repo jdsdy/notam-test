@@ -29,6 +29,15 @@ export async function signUpWithPassword(
   const name = String(formData.get("name") ?? "").trim();
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
+  const betaAccessKey = String(formData.get("betaAccessKey") ?? "").trim();
+
+  const expectedBetaAccessKey = process.env.NEXT_PUBLIC_BETA_ACCESS_KEY ?? "";
+  if (!expectedBetaAccessKey || betaAccessKey !== expectedBetaAccessKey) {
+    return {
+      ok: false as const,
+      message: "Invalid Beta Access Key.",
+    };
+  }
 
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase.auth.signUp({

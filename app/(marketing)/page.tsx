@@ -238,7 +238,7 @@ export default async function MarketingHomePage() {
                 Already holding an account?
               </h2>
               <p className="mt-3 text-sm text-muted-foreground">
-                Sign in on the app subdomain to pick up where you left off.
+                Sign in to pick up where you left off.
                 Otherwise, email us and we&apos;ll add you to the pilot group.
               </p>
             </div>
