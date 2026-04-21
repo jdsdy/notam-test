@@ -9,6 +9,16 @@
 // always ships `@napi-rs/canvas`, and we install it before `pdf-parse` is
 // evaluated via a deferred dynamic import.
 import { DOMMatrix, DOMPoint, ImageData, Path2D } from "@napi-rs/canvas";
+// pdfjs-dist' node "fake worker" path does a dynamic `import(workerSrc)` for
+// pdf.worker.mjs when running on the server. Next.js' file tracer cannot see
+// that runtime string, so the worker module is omitted from the Vercel
+// function bundle and we get: `Setting up fake worker failed: "Cannot find
+// module '.../pdfjs-dist/legacy/build/pdf.worker.mjs'"`.
+//
+// Statically importing the worker module here (a) guarantees Next includes it
+// in the output bundle, and (b) registers `globalThis.pdfjsWorker` with the
+// main-thread WorkerMessageHandler so pdfjs skips the dynamic import entirely.
+import "pdfjs-dist/legacy/build/pdf.worker.mjs";
 
 // The @napi-rs/canvas DOM shims aren't structurally identical to lib.dom's
 // DOMMatrix/ImageData/Path2D typings (some methods differ), but pdfjs-dist
