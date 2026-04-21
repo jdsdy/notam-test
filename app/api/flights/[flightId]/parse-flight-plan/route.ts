@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import Anthropic, { toFile } from "@anthropic-ai/sdk";
 
 import type { FlightPlanParseApiResponse } from "@/lib/flight-plan-parse";
@@ -390,11 +390,16 @@ export async function POST(
       flightId,
     );
 
-    void runDetachedNotamPersistence({
-      anthropic,
-      supabase,
-      flightId,
-      notamBatchPdfs,
+    // Schedule NOTAM extraction to continue after the response is sent.
+    // On Vercel the invocation is suspended once the response flushes unless
+    // `after()` (which uses `waitUntil` under the hood) keeps it alive.
+    after(async () => {
+      await runDetachedNotamPersistence({
+        anthropic,
+        supabase,
+        flightId,
+        notamBatchPdfs,
+      });
     });
 
     const body: FlightPlanParseApiResponse = {
