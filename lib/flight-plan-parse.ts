@@ -1,3 +1,4 @@
+import type { SplitterResult } from "@/lib/flight-plan/schemas";
 import type { RawNotam } from "@/lib/notams";
 
 /** Fields extracted from a flight plan PDF and persisted to `flights`. */
@@ -53,6 +54,27 @@ export type FlightPlanParseApiResponse = {
   notamAnalysisId: string | null;
   /** Same NOTAM list as in `fields.flight_plan_json` — convenient for UI badges without re-parsing. */
   notamsIdentified: RawNotam[];
+};
+
+/** Response from `POST /api/flights/[flightId]/parse/identify-flight-plan`. */
+export type IdentifyFlightPlanApiResponse = {
+  ok: true;
+  planPdfUuid: string;
+  splitterResult: SplitterResult;
+  totalPages: number;
+};
+
+/** Response from `POST /api/flights/[flightId]/parse/extract-flight-plan`. */
+export type ExtractFlightPlanApiResponse = {
+  ok: true;
+  fields: FlightPlanParsedFields;
+  needsManualReview: FlightPlanFieldKey[];
+};
+
+/** Response from `POST /api/flights/[flightId]/parse/extract-notams`. */
+export type ExtractNotamsFromPlanApiResponse = {
+  ok: true;
+  notamAnalysisId: string | null;
 };
 
 /** Fills API response metadata after persistence (IDs come from the database). */

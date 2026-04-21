@@ -1,3 +1,4 @@
+import { PDFDocument } from "pdf-lib";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -7,9 +8,9 @@ const mocks = vi.hoisted(() => ({
   deleteFile: vi.fn(),
   extractPdfText: vi.fn(),
   storageUpload: vi.fn(),
+  storageDownload: vi.fn(),
 
   createSupabaseServerClient: vi.fn(),
-  getCurrentUser: vi.fn(),
 
   assertUserCanAccessFlight: vi.fn(),
   assertAircraftBelongsToOrganisation: vi.fn(),
@@ -20,7 +21,7 @@ const mocks = vi.hoisted(() => ({
 
   runPdfSplitterAgent: vi.fn(),
   splitPdfBySplitterResult: vi.fn(),
-  runNotamExtractionAgent: vi.fn(),
+  runNotamExtractionOnTextChunks: vi.fn(),
   runFlightDataExtractionAgent: vi.fn(),
   runFlightRouteWeatherTableAgent: vi.fn(),
 }));
@@ -38,7 +39,6 @@ vi.mock("@/lib/pdf-parse-server", () => ({
 
 vi.mock("@/lib/supabase/server", () => ({
   createSupabaseServerClient: mocks.createSupabaseServerClient,
-  getCurrentUser: mocks.getCurrentUser,
 }));
 
 vi.mock("@/lib/api-rate-limit", () => ({
@@ -61,8 +61,8 @@ vi.mock("@/lib/flight-plan/agents/pdf-splitter", () => ({
   splitPdfBySplitterResult: mocks.splitPdfBySplitterResult,
 }));
 
-vi.mock("@/lib/flight-plan/agents/notam-extraction", () => ({
-  runNotamExtractionAgent: mocks.runNotamExtractionAgent,
+vi.mock("@/lib/flight-plan/notam-text-split", () => ({
+  runNotamExtractionOnTextChunks: mocks.runNotamExtractionOnTextChunks,
 }));
 
 vi.mock("@/lib/flight-plan/agents/flight-data-extraction", () => ({
@@ -73,58 +73,65 @@ vi.mock("@/lib/flight-plan/agents/flight-route-weather-extraction", () => ({
   runFlightRouteWeatherTableAgent: mocks.runFlightRouteWeatherTableAgent,
 }));
 
-import { POST } from "@/app/api/flights/[flightId]/parse-flight-plan/route";
+import { POST as postIdentify } from "@/app/api/flights/[flightId]/parse/identify-flight-plan/route";
+import { POST as postExtractFlight } from "@/app/api/flights/[flightId]/parse/extract-flight-plan/route";
+import { POST as postExtractNotams } from "@/app/api/flights/[flightId]/parse/extract-notams/route";
 
-function createDeferred<T>() {
-  let resolve!: (value: T | PromiseLike<T>) => void;
-  let reject!: (reason?: unknown) => void;
-
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-
-  return { promise, resolve, reject };
-}
+const SPLITTER_RESULT = {
+  notamGroups: [
+    { pages: [1, 2, 3], notamCount: 2, startId: "A1/26", endId: "B2/26" },
+  ],
+  windMapPages: [] as number[],
+  routeWeatherTablePages: [4],
+  flightDetailPages: [5, 6],
+};
 
 function createMultipartRequest(formData: FormData): Request {
-  return new Request("http://localhost/api/flights/f-1/parse-flight-plan", {
+  return new Request("http://localhost/api/flights/f-1/parse/identify-flight-plan", {
     method: "POST",
     body: formData,
   });
 }
 
-describe("POST /api/flights/[flightId]/parse-flight-plan", () => {
+function mockSupabaseForFlightAccess() {
+  const mockMaybeSingle = vi.fn().mockResolvedValue({
+    data: {
+      organisation_id: "org-1",
+      aircraft_id: "ac-1",
+    },
+    error: null,
+  });
+  const mockEq = vi.fn().mockReturnValue({
+    maybeSingle: mockMaybeSingle,
+  });
+  const mockSelect = vi.fn().mockReturnValue({
+    eq: mockEq,
+  });
+
+  mocks.createSupabaseServerClient.mockResolvedValue({
+    auth: {
+      getUser: vi.fn().mockResolvedValue({
+        data: { user: { id: "user-1" } },
+      }),
+    },
+    from: vi.fn().mockReturnValue({
+      select: mockSelect,
+    }),
+    storage: {
+      from: vi.fn().mockReturnValue({
+        upload: mocks.storageUpload,
+        download: mocks.storageDownload,
+      }),
+    },
+  });
+}
+
+describe("POST /api/flights/[flightId]/parse/identify-flight-plan", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.ANTHROPIC_API_KEY = "test-key";
 
-    const mockMaybeSingle = vi.fn().mockResolvedValue({
-      data: {
-        organisation_id: "org-1",
-        aircraft_id: "ac-1",
-        departure_icao: "YSSY",
-        arrival_icao: "YMML",
-        departure_time: "2026-04-18T12:00:00.000Z",
-        arrival_time: "2026-04-18T15:00:00.000Z",
-        time_enroute: 180,
-        departure_rwy: "16R",
-        arrival_rwy: "27",
-        route: "YSSY DCT YMML",
-        aircraft_weight: 18000,
-        status: "draft",
-        flight_plan_json: null,
-        flight_metadata: null,
-        pdf_file_id: null,
-      },
-      error: null,
-    });
-    const mockEq = vi.fn().mockReturnValue({
-      maybeSingle: mockMaybeSingle,
-    });
-    const mockSelect = vi.fn().mockReturnValue({
-      eq: mockEq,
-    });
+    mockSupabaseForFlightAccess();
 
     mocks.anthropicCtor.mockReturnValue({
       beta: {
@@ -140,42 +147,102 @@ describe("POST /api/flights/[flightId]/parse-flight-plan", () => {
       error: null,
     });
 
-    mocks.createSupabaseServerClient.mockResolvedValue({
-      auth: {
-        getUser: vi.fn().mockResolvedValue({
-          data: { user: { id: "user-1" } },
-        }),
-      },
-      from: vi.fn().mockReturnValue({
-        select: mockSelect,
-      }),
-      storage: {
-        from: vi.fn().mockReturnValue({
-          upload: mocks.storageUpload,
-        }),
-      },
-    });
-    mocks.getCurrentUser.mockImplementation(() => {
-      throw new Error("Route must validate with supabase.auth.getUser()");
-    });
     mocks.assertUserCanAccessFlight.mockResolvedValue({ organisationId: "org-1" });
     mocks.assertAircraftBelongsToOrganisation.mockResolvedValue(true);
     mocks.toFile.mockResolvedValue({ any: "file" });
+    mocks.uploadFile.mockResolvedValueOnce({ id: "file_original" });
+    mocks.deleteFile.mockResolvedValue({ id: "deleted", type: "file_deleted" });
+
+    mocks.runPdfSplitterAgent.mockResolvedValue(SPLITTER_RESULT);
+  });
+
+  it("returns 400 when required multipart fields are missing", async () => {
+    const form = new FormData();
+    form.set("file", new File([new Uint8Array([1, 2, 3])], "plan.pdf", { type: "application/pdf" }));
+
+    const response = await postIdentify(createMultipartRequest(form), {
+      params: Promise.resolve({ flightId: "f-1" }),
+    });
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/organisation|aircraft/i),
+    });
+  });
+
+  it("stores the PDF, runs the splitter, and returns planPdfUuid and splitterResult", async () => {
+    const randomUuidSpy = vi
+      .spyOn(globalThis.crypto, "randomUUID")
+      .mockReturnValue("123e4567-e89b-12d3-a456-426614174000");
+
+    const emptyPdf = await PDFDocument.create();
+    const pdfBytes = new Uint8Array(await emptyPdf.save());
+
+    const form = new FormData();
+    form.set("organisationId", "org-1");
+    form.set("aircraftId", "ac-1");
+    form.set(
+      "file",
+      new File([pdfBytes], "plan.pdf", { type: "application/pdf" }),
+    );
+
+    const response = await postIdentify(createMultipartRequest(form), {
+      params: Promise.resolve({ flightId: "f-1" }),
+    });
+
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.planPdfUuid).toBe("123e4567-e89b-12d3-a456-426614174000");
+    expect(body.splitterResult).toEqual(SPLITTER_RESULT);
+    expect(typeof body.totalPages).toBe("number");
+
+    expect(mocks.storageUpload).toHaveBeenCalledWith(
+      "org-1/123e4567-e89b-12d3-a456-426614174000.pdf",
+      expect.any(Uint8Array),
+      expect.objectContaining({ contentType: "application/pdf" }),
+    );
+    expect(mocks.runPdfSplitterAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ originalFileId: "file_original" }),
+    );
+    expect(mocks.deleteFile).toHaveBeenCalledWith(
+      "file_original",
+      expect.objectContaining({ betas: ["files-api-2025-04-14"] }),
+    );
+
+    randomUuidSpy.mockRestore();
+  });
+});
+
+describe("POST /api/flights/[flightId]/parse/extract-flight-plan", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.ANTHROPIC_API_KEY = "test-key";
+
+    mockSupabaseForFlightAccess();
+
+    mocks.storageDownload.mockResolvedValue({
+      data: {
+        arrayBuffer: async () => new Uint8Array([0x25, 0x50, 0x44, 0x46]).buffer,
+      },
+      error: null,
+    });
+
+    mocks.anthropicCtor.mockReturnValue({
+      beta: {
+        files: {
+          upload: mocks.uploadFile,
+          delete: mocks.deleteFile,
+        },
+      },
+    });
+
     mocks.uploadFile
-      .mockResolvedValueOnce({ id: "file_original" })
       .mockResolvedValueOnce({ id: "file_route" })
       .mockResolvedValueOnce({ id: "file_flight" });
     mocks.deleteFile.mockResolvedValue({ id: "deleted", type: "file_deleted" });
-    mocks.extractPdfText.mockResolvedValue("NOTAM TEXT FROM PDF");
-
-    mocks.runPdfSplitterAgent.mockResolvedValue({
-      notamGroups: [
-        { pages: [1, 2, 3], notamCount: 2, startId: "A1/26", endId: "B2/26" },
-      ],
-      windMapPages: [],
-      routeWeatherTablePages: [4],
-      flightDetailPages: [5, 6],
-    });
 
     mocks.splitPdfBySplitterResult.mockResolvedValue({
       flightDetailsPdf: new Uint8Array([0x25, 0x50, 0x44, 0x46]),
@@ -201,7 +268,78 @@ describe("POST /api/flights/[flightId]/parse-flight-plan", () => {
       flight_metadata: { cruise_altitude: "FL320" },
       unidentified_fields: ["arrival_rwy"],
     });
-    mocks.runNotamExtractionAgent.mockResolvedValue({
+
+    mocks.applyParsedFlightPlanToFlight.mockResolvedValue({ ok: true });
+
+    mocks.assertUserCanAccessFlight.mockResolvedValue({ organisationId: "org-1" });
+    mocks.assertAircraftBelongsToOrganisation.mockResolvedValue(true);
+    mocks.toFile.mockResolvedValue({ any: "file" });
+  });
+
+  it("downloads the stored PDF, extracts flight fields, and applies them to the flight", async () => {
+    const req = new Request(
+      "http://localhost/api/flights/f-1/parse/extract-flight-plan",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          organisationId: "org-1",
+          aircraftId: "ac-1",
+          planPdfUuid: "123e4567-e89b-12d3-a456-426614174000",
+          splitterResult: SPLITTER_RESULT,
+        }),
+      },
+    );
+
+    const response = await postExtractFlight(req, {
+      params: Promise.resolve({ flightId: "f-1" }),
+    });
+
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.needsManualReview).toEqual(["arrival_rwy"]);
+    expect(body.fields.departure_icao).toBe("YSSY");
+    expect(body.fields.route).toBe("YSSY DCT YMML");
+    expect(body.fields.pdf_file_id).toBe("123e4567-e89b-12d3-a456-426614174000");
+
+    expect(mocks.splitPdfBySplitterResult).toHaveBeenCalled();
+    expect(mocks.applyParsedFlightPlanToFlight).toHaveBeenCalledWith(
+      expect.anything(),
+      "f-1",
+      "org-1",
+      expect.objectContaining({
+        departure_icao: "YSSY",
+        pdf_file_id: "123e4567-e89b-12d3-a456-426614174000",
+      }),
+    );
+  });
+});
+
+describe("POST /api/flights/[flightId]/parse/extract-notams", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.ANTHROPIC_API_KEY = "test-key";
+
+    mockSupabaseForFlightAccess();
+
+    mocks.storageDownload.mockResolvedValue({
+      data: {
+        arrayBuffer: async () => new Uint8Array([0x25, 0x50, 0x44, 0x46]).buffer,
+      },
+      error: null,
+    });
+
+    mocks.anthropicCtor.mockReturnValue({});
+
+    mocks.splitPdfBySplitterResult.mockResolvedValue({
+      flightDetailsPdf: new Uint8Array([0x25]),
+      routeWeatherTablePdf: new Uint8Array([0x03]),
+      notamBatchPdfs: [new Uint8Array([0x01, 0x02, 0x03])],
+    });
+
+    mocks.extractPdfText.mockResolvedValue("NOTAM TEXT FROM PDF");
+    mocks.runNotamExtractionOnTextChunks.mockResolvedValue({
       extracted_notams: {
         notams: [
           {
@@ -222,120 +360,50 @@ describe("POST /api/flights/[flightId]/parse-flight-plan", () => {
       },
       unidentified_fields: [],
     });
-    mocks.applyParsedFlightPlanToFlight.mockResolvedValue({ ok: true });
+
     mocks.markPendingNotamExtraction.mockResolvedValue({
       notamAnalysisId: "na-pending",
     });
     mocks.upsertPendingNotamAnalysis.mockResolvedValue({ notamAnalysisId: "na-1" });
+
+    mocks.assertUserCanAccessFlight.mockResolvedValue({ organisationId: "org-1" });
+    mocks.assertAircraftBelongsToOrganisation.mockResolvedValue(true);
   });
 
-  it("returns 400 when required multipart fields are missing", async () => {
-    const form = new FormData();
-    form.set("file", new File([new Uint8Array([1, 2, 3])], "plan.pdf", { type: "application/pdf" }));
+  it("marks extraction pending, extracts NOTAM text, and upserts raw NOTAMs", async () => {
+    const req = new Request(
+      "http://localhost/api/flights/f-1/parse/extract-notams",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          organisationId: "org-1",
+          aircraftId: "ac-1",
+          planPdfUuid: "123e4567-e89b-12d3-a456-426614174000",
+          splitterResult: SPLITTER_RESULT,
+        }),
+      },
+    );
 
-    const response = await POST(createMultipartRequest(form), {
-      params: Promise.resolve({ flightId: "f-1" }),
-    });
-
-    expect(response.status).toBe(400);
-    const body = await response.json();
-    expect(body).toMatchObject({
-      ok: false,
-      error: expect.stringMatching(/organisation|aircraft/i),
-    });
-  });
-
-  it("persists flight-data extraction immediately and runs NOTAM extraction from parsed text", async () => {
-    const randomUuidSpy = vi
-      .spyOn(globalThis.crypto, "randomUUID")
-      .mockReturnValue("123e4567-e89b-12d3-a456-426614174000");
-
-    const form = new FormData();
-    form.set("organisationId", "org-1");
-    form.set("aircraftId", "ac-1");
-    form.set("file", new File([new Uint8Array([1, 2, 3])], "plan.pdf", { type: "application/pdf" }));
-
-    const response = await POST(createMultipartRequest(form), {
+    const response = await postExtractNotams(req, {
       params: Promise.resolve({ flightId: "f-1" }),
     });
 
     const body = await response.json();
     expect(response.status).toBe(200);
     expect(body.ok).toBe(true);
-    expect(body.needsManualReview).toEqual(["arrival_rwy"]);
-    expect(body.fields.arrival_time).toBe("2026-04-18T15:00:00.000Z");
-    expect(body.fields.route).toBe("YSSY DCT YMML");
-    expect(body.fields.departure_icao).toBe("YSSY");
-    expect(body.fields.arrival_rwy).toBeNull();
-    expect(body.fields.status).toBe("draft");
-    expect(body.fields.pdf_file_id).toBe("123e4567-e89b-12d3-a456-426614174000");
-    expect(body.fields.flight_plan_json).toBeNull();
-    expect(body.fields.flight_metadata).toEqual({ cruise_altitude: "FL320" });
-    expect(body.notamAnalysisId).toBe("na-pending");
-    expect(body.notamsIdentified).toEqual([]);
+    expect(body.notamAnalysisId).toBe("na-1");
 
-    expect(mocks.storageUpload).toHaveBeenCalledWith(
-      "org-1/123e4567-e89b-12d3-a456-426614174000.pdf",
-      expect.any(Uint8Array),
-      expect.objectContaining({ contentType: "application/pdf" }),
-    );
-    expect(mocks.uploadFile).toHaveBeenCalledTimes(3);
-    expect(mocks.uploadFile).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({ betas: ["files-api-2025-04-14"] }),
-    );
-    expect(mocks.toFile).toHaveBeenNthCalledWith(
-      1,
-      expect.any(Uint8Array),
-      "123e4567-e89b-12d3-a456-426614174000.pdf",
-      expect.objectContaining({ type: "application/pdf" }),
-    );
-
-    expect(mocks.runPdfSplitterAgent).toHaveBeenCalledWith(
-      expect.objectContaining({ originalFileId: "file_original" }),
-    );
-    expect(mocks.splitPdfBySplitterResult).toHaveBeenCalledWith(
-      expect.any(Uint8Array),
-      expect.objectContaining({
-        notamGroups: expect.arrayContaining([
-          expect.objectContaining({ pages: [1, 2, 3] }),
-        ]),
-        routeWeatherTablePages: [4],
-        flightDetailPages: [5, 6],
-      }),
-    );
-
-    expect(mocks.extractPdfText).toHaveBeenCalledWith(expect.any(Uint8Array));
-    expect(mocks.runNotamExtractionAgent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        notamText: "NOTAM TEXT FROM PDF",
-      }),
-    );
-    expect(mocks.runFlightRouteWeatherTableAgent).toHaveBeenCalledWith(
-      expect.objectContaining({ routeTableFileId: "file_route" }),
-    );
-    expect(mocks.runFlightDataExtractionAgent).toHaveBeenCalledWith(
-      expect.objectContaining({ flightDataFileId: "file_flight" }),
-    );
-    expect(mocks.applyParsedFlightPlanToFlight).toHaveBeenCalledWith(
-      expect.anything(),
-      "f-1",
-      "org-1",
-      expect.objectContaining({
-        departure_icao: "YSSY",
-        arrival_icao: "YMML",
-        arrival_rwy: null,
-        status: "draft",
-        pdf_file_id: "123e4567-e89b-12d3-a456-426614174000",
-      }),
-    );
     expect(mocks.markPendingNotamExtraction).toHaveBeenCalledWith(
       expect.anything(),
       "f-1",
     );
-
-    await Promise.resolve();
-    await Promise.resolve();
+    expect(mocks.extractPdfText).toHaveBeenCalledWith(expect.any(Uint8Array));
+    expect(mocks.runNotamExtractionOnTextChunks).toHaveBeenCalledWith(
+      expect.objectContaining({
+        notamText: "NOTAM TEXT FROM PDF",
+      }),
+    );
     expect(mocks.upsertPendingNotamAnalysis).toHaveBeenCalledWith(
       expect.anything(),
       "f-1",
@@ -345,89 +413,6 @@ describe("POST /api/flights/[flightId]/parse-flight-plan", () => {
         ]),
       }),
     );
-
-    expect(mocks.deleteFile).toHaveBeenCalledTimes(3);
-    const deletedIds = mocks.deleteFile.mock.calls.map((call) => call[0]).sort();
-    expect(deletedIds).toEqual(["file_flight", "file_original", "file_route"]);
-    for (const call of mocks.deleteFile.mock.calls) {
-      expect(call[1]).toEqual(
-        expect.objectContaining({ betas: ["files-api-2025-04-14"] }),
-      );
-    }
-
-    randomUuidSpy.mockRestore();
-  });
-
-  it("returns the flight-data response without waiting for NOTAM extraction to finish", async () => {
-    const deferred = createDeferred<{
-      extracted_notams: {
-        notams: Array<{
-          id: string;
-          title: string;
-          q: string;
-          a: string;
-          b: string;
-          c: string;
-          d: string;
-          e: string;
-          f: string;
-          g: string;
-          null_values: string[];
-        }>;
-        unformatted_notams: string[];
-      };
-      unidentified_fields: string[];
-    }>();
-    mocks.runNotamExtractionAgent.mockReturnValueOnce(deferred.promise);
-
-    const form = new FormData();
-    form.set("organisationId", "org-1");
-    form.set("aircraftId", "ac-1");
-    form.set("file", new File([new Uint8Array([1, 2, 3])], "plan.pdf", { type: "application/pdf" }));
-
-    const response = await POST(createMultipartRequest(form), {
-      params: Promise.resolve({ flightId: "f-1" }),
-    });
-
-    expect(response.status).toBe(200);
-    expect(mocks.markPendingNotamExtraction).toHaveBeenCalledTimes(1);
-    expect(mocks.upsertPendingNotamAnalysis).toHaveBeenCalledTimes(0);
-
-    deferred.resolve({
-      extracted_notams: { notams: [], unformatted_notams: [] },
-      unidentified_fields: ["extracted_notams"],
-    });
-
-    const deadline = Date.now() + 3000;
-    while (
-      mocks.upsertPendingNotamAnalysis.mock.calls.length === 0 &&
-      Date.now() < deadline
-    ) {
-      await new Promise<void>((r) => setImmediate(r));
-    }
-    expect(mocks.upsertPendingNotamAnalysis).toHaveBeenCalledTimes(1);
-  });
-
-  it("surfaces a splitter failure during the diagnostic flow", async () => {
-    mocks.runPdfSplitterAgent.mockRejectedValueOnce(
-      new Error("[pdf-splitter-agent] bad segmentation"),
-    );
-
-    const form = new FormData();
-    form.set("organisationId", "org-1");
-    form.set("aircraftId", "ac-1");
-    form.set("file", new File([new Uint8Array([1])], "plan.pdf", { type: "application/pdf" }));
-
-    const response = await POST(createMultipartRequest(form), {
-      params: Promise.resolve({ flightId: "f-1" }),
-    });
-
-    expect(response.status).toBe(500);
-    const body = await response.json();
-    expect(body).toMatchObject({
-      ok: false,
-      error: expect.stringContaining("pdf-splitter-agent"),
-    });
   });
 
   it("returns 401 when auth user is missing", async () => {
@@ -439,12 +424,21 @@ describe("POST /api/flights/[flightId]/parse-flight-plan", () => {
       },
     });
 
-    const form = new FormData();
-    form.set("organisationId", "org-1");
-    form.set("aircraftId", "ac-1");
-    form.set("file", new File([new Uint8Array([1])], "plan.pdf", { type: "application/pdf" }));
+    const req = new Request(
+      "http://localhost/api/flights/f-1/parse/extract-notams",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          organisationId: "org-1",
+          aircraftId: "ac-1",
+          planPdfUuid: "123e4567-e89b-12d3-a456-426614174000",
+          splitterResult: SPLITTER_RESULT,
+        }),
+      },
+    );
 
-    const response = await POST(createMultipartRequest(form), {
+    const response = await postExtractNotams(req, {
       params: Promise.resolve({ flightId: "f-1" }),
     });
 

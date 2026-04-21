@@ -18,8 +18,10 @@ import {
 import type { NotamAnalysisWorkspaceState } from "@/lib/notam-analyses";
 import type { FlightDetail } from "@/lib/flights";
 import type {
+  ExtractFlightPlanApiResponse,
   FlightPlanFieldKey,
   FlightPlanParseApiResponse,
+  IdentifyFlightPlanApiResponse,
 } from "@/lib/flight-plan-parse";
 import type { AnalysedNotam } from "@/lib/notams";
 import {
@@ -56,7 +58,9 @@ function formStateFromFlight(flight: FlightDetail) {
 
 type FormState = ReturnType<typeof formStateFromFlight>;
 
-function applyParseToFormState(res: FlightPlanParseApiResponse): FormState {
+function applyParseToFormState(
+  res: Pick<FlightPlanParseApiResponse, "fields" | "needsManualReview">,
+): FormState {
   const f = res.fields;
   return {
     departure_icao: f.departure_icao ?? "",
@@ -422,7 +426,8 @@ const CATEGORY_META: Record<
 type AiPhase =
   | "idle"
   | "uploading"
-  | "extracting-flight"
+  | "identifying"
+  | "extracting-parallel"
   | "extracting-notams"
   | "ready"
   | "analysing"
@@ -445,6 +450,11 @@ export default function FlightWorkspace({
     () => new Set(),
   );
   const [parseError, setParseError] = React.useState<string | null>(null);
+  const [notamExtractError, setNotamExtractError] = React.useState<string | null>(
+    null,
+  );
+  const [parallelFlightReady, setParallelFlightReady] = React.useState(false);
+  const [parallelNotamReady, setParallelNotamReady] = React.useState(false);
   const [saveError, setSaveError] = React.useState<string | null>(null);
   const [analyseError, setAnalyseError] = React.useState<string | null>(null);
   const [savePending, startSave] = React.useTransition();
@@ -471,7 +481,13 @@ export default function FlightWorkspace({
   // Keep phase in sync with server state when not in an active client flow.
   React.useEffect(() => {
     setPhase((current) => {
-      if (current === "uploading" || current === "extracting-flight") {
+      if (current === "uploading" || current === "identifying") {
+        return current;
+      }
+      if (
+        current === "extracting-parallel" &&
+        (!parallelFlightReady || !parallelNotamReady)
+      ) {
         return current;
       }
       if (current === "analysing") return current;
@@ -483,7 +499,14 @@ export default function FlightWorkspace({
       }
       return current;
     });
-  }, [extractionPending, latestAnalysis, notamWorkspace.pending, pendingRawCount]);
+  }, [
+    extractionPending,
+    latestAnalysis,
+    notamWorkspace.pending,
+    parallelFlightReady,
+    parallelNotamReady,
+    pendingRawCount,
+  ]);
 
   // Poll for background NOTAM extraction completion.
   React.useEffect(() => {
@@ -507,11 +530,13 @@ export default function FlightWorkspace({
     if (!file) return;
 
     setParseError(null);
+    setNotamExtractError(null);
+    setParallelFlightReady(false);
+    setParallelNotamReady(false);
     setPhase("uploading");
 
-    // After a brief visual delay, shift shimmer text to the next step.
-    const flightStepTimer = window.setTimeout(() => {
-      setPhase((p) => (p === "uploading" ? "extracting-flight" : p));
+    const identifyStepTimer = window.setTimeout(() => {
+      setPhase((p) => (p === "uploading" ? "identifying" : p));
     }, 1200);
 
     try {
@@ -520,34 +545,110 @@ export default function FlightWorkspace({
       fd.append("aircraftId", flight.aircraft_id);
       fd.append("organisationId", organisationId);
 
-      const res = await fetch(
-        `/api/flights/${flight.id}/parse-flight-plan`,
+      const identifyRes = await fetch(
+        `/api/flights/${flight.id}/parse/identify-flight-plan`,
         { method: "POST", credentials: "same-origin", body: fd },
       );
-      const body = (await res.json()) as
-        | FlightPlanParseApiResponse
+      const identifyBody = (await identifyRes.json()) as
+        | IdentifyFlightPlanApiResponse
         | { ok?: false; error?: string };
 
-      window.clearTimeout(flightStepTimer);
+      window.clearTimeout(identifyStepTimer);
 
-      if (!res.ok || !("ok" in body) || body.ok !== true) {
+      if (!identifyRes.ok || !("ok" in identifyBody) || identifyBody.ok !== true) {
         const msg =
-          typeof body === "object" && body && "error" in body
-            ? String((body as { error?: string }).error ?? res.statusText)
+          typeof identifyBody === "object" && identifyBody && "error" in identifyBody
+            ? String((identifyBody as { error?: string }).error ?? identifyRes.statusText)
             : "Request failed.";
         setParseError(msg);
         setPhase("idle");
         return;
       }
 
-      setForm(applyParseToFormState(body));
-      setNeedsReview(new Set(body.needsManualReview));
-      setInfoRevealed(true);
-      setInfoCollapsed(false);
-      setPhase("extracting-notams");
-      router.refresh();
+      const extractPayload = {
+        organisationId,
+        aircraftId: flight.aircraft_id,
+        planPdfUuid: identifyBody.planPdfUuid,
+        splitterResult: identifyBody.splitterResult,
+      };
+
+      setPhase("extracting-parallel");
+
+      const flightReq = fetch(
+        `/api/flights/${flight.id}/parse/extract-flight-plan`,
+        {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(extractPayload),
+        },
+      ).then(async (res) => ({
+        res,
+        body: (await res.json()) as
+          | ExtractFlightPlanApiResponse
+          | { ok?: false; error?: string },
+      }));
+
+      const notamReq = fetch(`/api/flights/${flight.id}/parse/extract-notams`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(extractPayload),
+      }).then(async (res) => ({
+        res,
+        body: (await res.json()) as
+          | { ok: true; notamAnalysisId: string | null }
+          | { ok?: false; error?: string },
+      }));
+
+      flightReq
+        .then(({ res, body }) => {
+          if (res.ok && "ok" in body && body.ok === true) {
+            setForm(applyParseToFormState(body));
+            setNeedsReview(new Set(body.needsManualReview));
+            setInfoRevealed(true);
+            setInfoCollapsed(false);
+            setParallelFlightReady(true);
+            router.refresh();
+          } else {
+            const msg =
+              typeof body === "object" && body && "error" in body
+                ? String((body as { error?: string }).error ?? res.statusText)
+                : "Flight plan extraction failed.";
+            setParseError(msg);
+            setParallelFlightReady(true);
+          }
+        })
+        .catch(() => {
+          setParseError("Network error while extracting flight details.");
+          setParallelFlightReady(true);
+        });
+
+      notamReq
+        .then(({ res, body }) => {
+          if (res.ok && "ok" in body && body.ok === true) {
+            setNotamExtractError(null);
+            setParallelNotamReady(true);
+            router.refresh();
+          } else {
+            const msg =
+              typeof body === "object" && body && "error" in body
+                ? String((body as { error?: string }).error ?? res.statusText)
+                : "NOTAM extraction failed.";
+            setNotamExtractError(msg);
+            setParallelNotamReady(true);
+            router.refresh();
+          }
+        })
+        .catch(() => {
+          setNotamExtractError("Network error while extracting NOTAMs.");
+          setParallelNotamReady(true);
+          router.refresh();
+        });
+
+      await Promise.allSettled([flightReq, notamReq]);
     } catch {
-      window.clearTimeout(flightStepTimer);
+      window.clearTimeout(identifyStepTimer);
       setParseError("Network error while parsing the flight plan.");
       setPhase("idle");
     }
@@ -609,7 +710,8 @@ export default function FlightWorkspace({
   const hasFile = Boolean(fileName);
   const extracting =
     phase === "uploading" ||
-    phase === "extracting-flight" ||
+    phase === "identifying" ||
+    phase === "extracting-parallel" ||
     phase === "extracting-notams";
 
   return (
@@ -652,22 +754,29 @@ export default function FlightWorkspace({
                   ? "Waiting"
                   : phase === "uploading"
                     ? "Uploading"
-                    : phase === "extracting-flight"
-                      ? "Extracting"
-                      : phase === "extracting-notams"
-                        ? "Finding NOTAMs"
-                        : phase === "ready"
-                          ? "NOTAMs ready"
-                          : phase === "analysing"
-                            ? "Analysing"
-                            : "Complete"}
+                    : phase === "identifying"
+                      ? "Identifying"
+                      : phase === "extracting-parallel"
+                        ? "Extracting"
+                        : phase === "extracting-notams"
+                          ? "Finding NOTAMs"
+                          : phase === "ready"
+                            ? "NOTAMs ready"
+                            : phase === "analysing"
+                              ? "Analysing"
+                              : "Complete"}
               </span>
             }
           />
           <div className="space-y-5 px-6 py-6">
             {parseError ? (
-              <AlertBanner tone="error" title="Extraction failed">
+              <AlertBanner tone="error" title="Flight extraction failed">
                 {parseError}
+              </AlertBanner>
+            ) : null}
+            {notamExtractError ? (
+              <AlertBanner tone="error" title="NOTAM extraction failed">
+                {notamExtractError}
               </AlertBanner>
             ) : null}
 
@@ -726,36 +835,66 @@ export default function FlightWorkspace({
                     "min-w-[112px]",
                   )}
                 >
-                  {phase === "uploading" || phase === "extracting-flight"
-                    ? "Extracting…"
-                    : "Extract"}
+                  {extracting ? "Extracting…" : "Extract"}
                 </button>
               </div>
             </div>
 
             {/* Progress shimmer */}
             <Collapsible open={extracting}>
-              <div className="flex items-center gap-3 rounded-2xl border border-border/50 bg-white/40 px-4 py-3">
-                <LoaderRing />
-                <div className="min-w-0">
-                  <TextShimmer
-                    as="p"
-                    duration={2.4}
-                    className="text-sm font-medium"
-                  >
-                    {phase === "uploading"
-                      ? "Uploading your PDF"
-                      : phase === "extracting-flight"
-                        ? "Extracting flight information"
-                        : "Extracting NOTAMs"}
-                  </TextShimmer>
-                  <p className="text-[0.72rem] text-muted-foreground">
-                    {phase === "uploading"
-                      ? "Streaming bytes to Jet Ops securely."
-                      : phase === "extracting-flight"
-                        ? "Reading route, timings, runways and weight."
-                        : "Splitting NOTAMs out of the plan document."}
-                  </p>
+              <div className="flex items-start gap-3 rounded-2xl border border-border/50 bg-white/40 px-4 py-3">
+                {phase !== "extracting-parallel" ? <LoaderRing /> : null}
+                <div className="min-w-0 flex-1">
+                  {phase === "extracting-parallel" ? (
+                    <div className="space-y-3">
+                      <p className="text-sm font-medium text-foreground">
+                        Extracting flight information and NOTAMs
+                      </p>
+                      <div className="flex items-center gap-2 text-sm text-foreground">
+                        {parallelFlightReady ? (
+                          <CheckIcon className="h-4 w-4 shrink-0 text-emerald-600" />
+                        ) : (
+                          <span
+                            aria-hidden
+                            className="inline-block h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-primary/30 border-t-primary"
+                          />
+                        )}
+                        <span>Flight information</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm text-foreground">
+                        {parallelNotamReady ? (
+                          <CheckIcon className="h-4 w-4 shrink-0 text-emerald-600" />
+                        ) : (
+                          <span
+                            aria-hidden
+                            className="inline-block h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-primary/30 border-t-primary"
+                          />
+                        )}
+                        <span>NOTAM list</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <TextShimmer
+                        as="p"
+                        duration={2.4}
+                        className="text-sm font-medium"
+                      >
+                        {phase === "uploading"
+                          ? "Uploading your PDF"
+                          : phase === "identifying"
+                            ? "Identifying flight plan sections"
+                            : "Extracting NOTAMs"}
+                      </TextShimmer>
+                      <p className="text-[0.72rem] text-muted-foreground">
+                        {phase === "uploading"
+                          ? "Streaming bytes to Jet Ops securely."
+                          : phase === "identifying"
+                            ? "Finding NOTAM blocks, route tables, and flight-detail pages."
+                            : "Splitting NOTAMs out of the plan document."}
+                      </p>
+                    </>
+                  )}
                 </div>
               </div>
             </Collapsible>
@@ -765,7 +904,10 @@ export default function FlightWorkspace({
               open={
                 phase === "ready" ||
                 phase === "analysing" ||
-                phase === "analysed"
+                phase === "analysed" ||
+                (phase === "extracting-parallel" &&
+                  parallelNotamReady &&
+                  pendingRawCount > 0)
               }
             >
               <div className="grid gap-3 rounded-2xl border border-border/50 bg-white/50 p-4 sm:grid-cols-[1fr_auto] sm:items-center">
