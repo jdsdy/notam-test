@@ -92,14 +92,27 @@ For `section = 'notam'`, `reason` is a JSON string containing:
 
 ```json
 {
-  "notam_id": "A1234/26",
+  "notam": {
+    "id": "A1234/26",
+    "title": "RWY 09/27 CLSD",
+    "q": "KPTK/QMRLC/IV/NBO/W /000/999/4233N08325W005",
+    "a": "KPTK",
+    "b": "2604161200",
+    "c": "2604161800",
+    "d": "SAT SUN",
+    "e": "RWY 09/27 CLSD DUE WIP. ACFT MAY USE TWY ALPHA FOR ACCESS TO APRON 1 ONLY.",
+    "f": "SFC",
+    "g": "UNL",
+    "category": 1,
+    "summary": "High operational impact: rwy 09/27 clsd — review alternates, minima, and timing before departure."
+  },
   "aspects": ["incorrect_categorisation", "poor_notam_summary"]
 }
 ```
 
 Notes:
 
-- `notam_id` may be `null` if the NOTAM does not have an id.
+- `notam.id` may be `null` if the NOTAM does not have an id.
 - `aspects` is a non-empty list of ids defined in `lib/feedback.ts`:
   - `incorrect_categorisation`
   - `poor_data_extraction`

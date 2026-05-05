@@ -2,6 +2,8 @@
  * NOTAM-specific feedback: stored in `feedback.reason` as JSON.
  * `text` holds the pilot's free-form comment; `reason` holds structured context.
  */
+import type { AnalysedNotam } from "@/lib/notams";
+
 export const NOTAM_FEEDBACK_ASPECT_IDS = [
   "incorrect_categorisation",
   "poor_data_extraction",
@@ -17,7 +19,7 @@ export const NOTAM_FEEDBACK_ASPECT_LABELS: Record<NotamFeedbackAspectId, string>
 };
 
 export type NotamFeedbackReasonPayload = {
-  notam_id: string | null;
+  notam: AnalysedNotam;
   aspects: NotamFeedbackAspectId[];
 };
 

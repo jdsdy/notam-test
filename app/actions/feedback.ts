@@ -33,7 +33,20 @@ const notamSchema = z.object({
   section: z.literal("notam"),
   organisationId: z.string().uuid(),
   flightId: z.string().uuid(),
-  notamId: z.string().nullable(),
+  notam: z.object({
+    id: z.string().nullable(),
+    title: z.string().nullable(),
+    q: z.string().nullable(),
+    a: z.string().nullable(),
+    b: z.string().nullable(),
+    c: z.string().nullable(),
+    d: z.string().nullable().optional(),
+    e: z.string().nullable(),
+    f: z.string().nullable().optional(),
+    g: z.string().nullable().optional(),
+    category: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+    summary: z.string(),
+  }),
   aspects: z.array(notamAspectEnum).min(1, "Select at least one option."),
   text: z.string().trim().max(20000),
 });
@@ -127,7 +140,20 @@ export async function submitFlightFeedbackAction(input: {
 export async function submitNotamFeedbackAction(input: {
   organisationId: string;
   flightId: string;
-  notamId: string | null;
+  notam: {
+    id: string | null;
+    title: string | null;
+    q: string | null;
+    a: string | null;
+    b: string | null;
+    c: string | null;
+    d?: string | null;
+    e: string | null;
+    f?: string | null;
+    g?: string | null;
+    category: 1 | 2 | 3;
+    summary: string;
+  };
   aspects: string[];
   text: string;
 }): Promise<SubmitFeedbackResult> {
@@ -135,7 +161,7 @@ export async function submitNotamFeedbackAction(input: {
     section: "notam" as const,
     organisationId: input.organisationId,
     flightId: input.flightId,
-    notamId: input.notamId,
+    notam: input.notam,
     aspects: input.aspects,
     text: input.text,
   });
@@ -154,7 +180,7 @@ export async function submitNotamFeedbackAction(input: {
   }
 
   const reason = encodeNotamFeedbackReason({
-    notam_id: parsed.data.notamId,
+    notam: parsed.data.notam,
     aspects: parsed.data.aspects,
   });
 

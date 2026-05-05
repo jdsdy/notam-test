@@ -54,7 +54,7 @@ export default function NotamFeedbackForm({
       const res = await submitNotamFeedbackAction({
         organisationId,
         flightId,
-        notamId: notam.id,
+        notam,
         aspects,
         text: details,
       });
