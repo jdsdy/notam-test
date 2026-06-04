@@ -61,7 +61,7 @@ describe("runNotamCategorisationLlm", () => {
 
     expect(anthropic.beta.messages.stream).toHaveBeenCalledTimes(1);
     const call = vi.mocked(anthropic.beta.messages.stream).mock.calls[0]?.[0];
-    expect(call?.model).toBe("claude-opus-4-7");
+    expect(call?.model).toBe("claude-opus-4-8");
     expect(call?.thinking).toEqual({ type: "adaptive" });
     const user = call?.messages?.[0];
     expect(user?.role).toBe("user");
