@@ -8,7 +8,7 @@ import {
 } from "@/lib/flight-plan/schemas";
 
 const FILES_API_BETA = "files-api-2025-04-14";
-const SPLITTER_MODEL = "claude-opus-4-7";
+const SPLITTER_MODEL = "claude-opus-4-8";
 
 const SYSTEM_PROMPT = `
 You are a PDF segmentation agent for flight-plan PDFs. Your only job is to classify every page of the document and produce a structured plan describing how the PDF should be split for downstream extraction. You must not extract NOTAM content, flight values, waypoints, or any other data.

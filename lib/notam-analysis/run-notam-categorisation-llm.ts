@@ -8,7 +8,7 @@ import {
 } from "@/lib/notam-analysis/notam-categorisation-schema";
 import type { RawNotam } from "@/lib/notams";
 
-const NOTAM_ANALYSIS_MODEL = "claude-opus-4-7";
+const NOTAM_ANALYSIS_MODEL = "claude-opus-4-8";
 
 const SYSTEM_PROMPT = `
 You are an aviation NOTAM analyst assisting flight crews.
